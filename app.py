@@ -173,6 +173,11 @@ LIGHT_THEME = {
 
 
 def apply_theme(t):
+    is_light = t['bg'] == "#f5f7fa"
+    sidebar_text = "#1e293b" if is_light else "#e0e0e0"
+    input_bg = "#ffffff" if is_light else "#1a1d2e"
+    input_text = "#1e293b" if is_light else "#e0e0e0"
+
     st.markdown(f"""
     <style>
         .stApp {{ background-color: {t['bg']}; color: {t['text']}; }}
@@ -184,10 +189,35 @@ def apply_theme(t):
         [data-testid="stMetricValue"] {{ color: {t['metric_val']}; font-size: 1.8rem !important; }}
         [data-testid="stMetricLabel"] {{ color: {t['label']}; font-size: 0.8rem; }}
         h1, h2, h3 {{ color: {t['metric_val']} !important; }}
+
+        /* Сайдбар — текст и фон */
         [data-testid="stSidebar"] {{
-            background-color: {t['sidebar_bg']};
+            background-color: {t['sidebar_bg']} !important;
             border-right: 1px solid {t['card_border']};
         }}
+        [data-testid="stSidebar"] * {{
+            color: {sidebar_text} !important;
+        }}
+
+        /* Селекторы и инпуты */
+        [data-testid="stSidebar"] .stSelectbox > div > div {{
+            background-color: {input_bg} !important;
+            color: {input_text} !important;
+        }}
+        [data-testid="stSidebar"] label {{
+            color: {sidebar_text} !important;
+        }}
+        [data-testid="stSidebar"] .stRadio label {{
+            color: {sidebar_text} !important;
+        }}
+        [data-testid="stSidebar"] .stCheckbox label {{
+            color: {sidebar_text} !important;
+        }}
+
+        /* Основной контент */
+        p, span, div {{ color: {t['text']}; }}
+        .stMarkdown p {{ color: {t['text']} !important; }}
+
         hr {{ border-color: {t['hr']}; }}
         .ai-box {{
             background: {t['ai_bg']};
@@ -197,6 +227,7 @@ def apply_theme(t):
             margin-top: 12px;
             line-height: 1.8;
             font-size: 1rem;
+            color: {t['text']};
         }}
     </style>
     """, unsafe_allow_html=True)
