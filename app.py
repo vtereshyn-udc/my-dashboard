@@ -237,18 +237,20 @@ def apply_theme(t):
             background-color: {t['card_border']} !important;
         }}
 
-        /* Кнопки — текст всегда виден */
-        .stButton > button {{
-            background-color: {t['card_bg'] if is_light else '#1a1d2e'} !important;
+        /* Кнопки — агрессивный фикс */
+        button[kind="secondary"], button[kind="secondaryFormSubmit"],
+        .stButton button, div.stButton > button {{
+            background-color: {input_bg} !important;
             color: {input_text} !important;
             border: 1px solid {t['card_border']} !important;
+            font-weight: 500 !important;
         }}
-        .stButton > button:hover {{
+        .stButton button:hover, div.stButton > button:hover {{
             border-color: {t['metric_val']} !important;
             color: {t['metric_val']} !important;
+            background-color: {input_bg} !important;
         }}
-        /* Кнопка primary (Спросить AI) */
-        .stButton > button[kind="primary"] {{
+        button[kind="primary"], div.stButton > button[kind="primary"] {{
             background-color: {t['metric_val']} !important;
             color: #ffffff !important;
             border: none !important;
