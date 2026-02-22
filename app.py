@@ -361,11 +361,10 @@ Focus on: key trends, anomalies, specific ASIN insights, and concrete recommenda
 Keep response under 400 words.
 """
 
-    # Актуальные модели (проверено Feb 2026)
+    # Модель берётся из Secrets → GEMINI_MODEL, иначе дефолт
     MODELS = [
-        "gemini-2.5-flash",
+        st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash"),
         "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
         "gemini-flash-latest",
     ]
 
@@ -611,6 +610,11 @@ def table_detail(df, T):
 
 def main():
     with st.sidebar:
+        st.image(
+            "https://udcparts.com/cdn/shop/files/logo.svg?v=1701894617&width=300",
+            use_container_width=True
+        )
+        st.divider()
         lang = st.selectbox("🌐 Language / Мова / Язык", ["RU","UA","EN"], index=0)
         T = TRANSLATIONS[lang]
         theme_name = st.radio(T['theme'], [T['dark'], T['light']], horizontal=True)
