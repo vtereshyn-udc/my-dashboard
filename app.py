@@ -240,21 +240,23 @@ def apply_theme(t):
         .stButton button, div.stButton > button {{
             background-color: #e03131 !important;
             color: #ffffff !important;
-            border: none !important;
+            border: 2px solid #e03131 !important;
             font-weight: 500 !important;
         }}
         .stButton button:hover, div.stButton > button:hover {{
-            background-color: #c92a2a !important;
-            color: #ffffff !important;
+            background-color: #ffffff !important;
+            color: #e03131 !important;
+            border: 2px solid #e03131 !important;
         }}
-        /* Кнопка Спросить AI — синяя */
+        /* Спросить AI — красная с белым */
         .stButton button[kind="primary"], div.stButton > button[kind="primary"] {{
-            background-color: {t['metric_val']} !important;
+            background-color: #e03131 !important;
             color: #ffffff !important;
+            border: 2px solid #e03131 !important;
         }}
         .stButton button[kind="primary"]:hover {{
-            opacity: 0.85 !important;
-            background-color: {t['metric_val']} !important;
+            background-color: #ffffff !important;
+            color: #e03131 !important;
         }}
 
         hr {{ border-color: {t['hr']}; }}
