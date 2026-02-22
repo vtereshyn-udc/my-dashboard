@@ -237,26 +237,26 @@ def apply_theme(t):
             background-color: {t['card_border']} !important;
         }}
 
+        /* Обычные кнопки — стандартный вид */
         .stButton button, div.stButton > button {{
-            background-color: #e03131 !important;
-            color: #ffffff !important;
-            border: 2px solid #e03131 !important;
+            background-color: {input_bg} !important;
+            color: {input_text} !important;
+            border: 1px solid {t['card_border']} !important;
             font-weight: 500 !important;
         }}
         .stButton button:hover, div.stButton > button:hover {{
-            background-color: #ffffff !important;
-            color: #e03131 !important;
-            border: 2px solid #e03131 !important;
+            border-color: {t['metric_val']} !important;
+            color: {t['metric_val']} !important;
         }}
-        /* Спросить AI — красная с белым */
+        /* Только кнопка "Спросить AI" (primary) — красная */
         .stButton button[kind="primary"], div.stButton > button[kind="primary"] {{
             background-color: #e03131 !important;
             color: #ffffff !important;
-            border: 2px solid #e03131 !important;
+            border: none !important;
         }}
         .stButton button[kind="primary"]:hover {{
-            background-color: #ffffff !important;
-            color: #e03131 !important;
+            background-color: #c92a2a !important;
+            color: #ffffff !important;
         }}
 
         hr {{ border-color: {t['hr']}; }}
