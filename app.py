@@ -247,6 +247,15 @@ def apply_theme(t):
             background-color: #c92a2a !important;
             color: #ffffff !important;
         }}
+        /* Кнопка Спросить AI — синяя */
+        .stButton button[kind="primary"], div.stButton > button[kind="primary"] {{
+            background-color: {t['metric_val']} !important;
+            color: #ffffff !important;
+        }}
+        .stButton button[kind="primary"]:hover {{
+            opacity: 0.85 !important;
+            background-color: {t['metric_val']} !important;
+        }}
 
         hr {{ border-color: {t['hr']}; }}
         .ai-box {{
