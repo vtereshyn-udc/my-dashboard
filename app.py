@@ -361,14 +361,12 @@ Focus on: key trends, anomalies, specific ASIN insights, and concrete recommenda
 Keep response under 400 words.
 """
 
-    # Актуальные модели Google AI Studio (Feb 2026)
+    # Актуальные модели (проверено Feb 2026)
     MODELS = [
+        "gemini-2.5-flash",
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
-        "gemini-2.0-flash-exp",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash-001",
+        "gemini-flash-latest",
     ]
 
     import requests as req
