@@ -237,6 +237,23 @@ def apply_theme(t):
             background-color: {t['card_border']} !important;
         }}
 
+        /* Кнопки — текст всегда виден */
+        .stButton > button {{
+            background-color: {t['card_bg'] if is_light else '#1a1d2e'} !important;
+            color: {input_text} !important;
+            border: 1px solid {t['card_border']} !important;
+        }}
+        .stButton > button:hover {{
+            border-color: {t['metric_val']} !important;
+            color: {t['metric_val']} !important;
+        }}
+        /* Кнопка primary (Спросить AI) */
+        .stButton > button[kind="primary"] {{
+            background-color: {t['metric_val']} !important;
+            color: #ffffff !important;
+            border: none !important;
+        }}
+
         hr {{ border-color: {t['hr']}; }}
         .ai-box {{
             background: {t['ai_bg']};
