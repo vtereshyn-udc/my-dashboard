@@ -336,29 +336,8 @@ TOP 5 ASINs BY SALES:
     return summary
 
 
-def get_available_gemini_model(api_key: str) -> str:
-    """Берёт список моделей прямо из API и возвращает лучшую flash"""
-    import requests as req
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-    resp = req.get(url, timeout=10)
-    models = resp.json().get("models", [])
-    supported = [
-        m["name"].replace("models/", "")
-        for m in models
-        if "generateContent" in m.get("supportedGenerationMethods", [])
-        and "flash" in m["name"]
-    ]
-    # Предпочитаем 2.0, потом 1.5, lite в конце
-    preferred = sorted(supported, key=lambda x: (
-        "2.0" not in x, "1.5" not in x, "lite" in x
-    ))
-    if not preferred:
-        raise Exception(f"Нет доступных flash-моделей. Все модели: {[m['name'] for m in models]}")
-    return preferred[0]
-
-
 def ask_gemini(data_summary: str, user_question: str, lang: str) -> str:
-    """Отправляет запрос в Gemini API"""
+    """Отправляет запрос в Gemini API — перебирает модели пока одна не сработает"""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
     if not api_key:
         return None
@@ -382,19 +361,36 @@ Focus on: key trends, anomalies, specific ASIN insights, and concrete recommenda
 Keep response under 400 words.
 """
 
-    try:
-        import requests as req
-        model = get_available_gemini_model(api_key)
-        st.caption(f"🤖 Модель: `{model}`")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        response = req.post(url, json=payload, timeout=30)
-        result = response.json()
-        if "candidates" in result and result["candidates"]:
-            return result["candidates"][0]["content"]["parts"][0]["text"]
-        return f"Error: API response: {result}"
-    except Exception as e:
-        return f"Error: {e}"
+    # Актуальные модели Google AI Studio (Feb 2026)
+    MODELS = [
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-002",
+        "gemini-1.5-flash-001",
+    ]
+
+    import requests as req
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+
+    for model in MODELS:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            response = req.post(url, json=payload, timeout=30)
+            result = response.json()
+
+            if "error" in result:
+                continue  # эта модель недоступна → пробуем следующую
+
+            if "candidates" in result and result["candidates"]:
+                st.caption(f"🤖 Модель: `{model}`")
+                return result["candidates"][0]["content"]["parts"][0]["text"]
+
+        except Exception:
+            continue
+
+    return "Error: ни одна модель не доступна для вашего API ключа"
 
 
 
