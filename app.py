@@ -336,7 +336,27 @@ TOP 5 ASINs BY SALES:
     return summary
 
 
-def ask_gemini(data_summary: str, user_question: str, lang: str) -> str:
+def get_available_gemini_model(api_key: str) -> str:
+    """Находит первую доступную модель Gemini для generateContent"""
+    try:
+        import requests as req
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        resp = req.get(url, timeout=10)
+        models = resp.json().get("models", [])
+        # Фильтруем те что поддерживают generateContent, предпочитаем flash
+        supported = [
+            m["name"].replace("models/", "")
+            for m in models
+            if "generateContent" in m.get("supportedGenerationMethods", [])
+            and "flash" in m["name"]
+        ]
+        # Сортируем: 2.0 > 1.5, lite в конце
+        preferred = sorted(supported, key=lambda x: (
+            "2.0" not in x, "1.5" not in x, "lite" in x
+        ))
+        return preferred[0] if preferred else "gemini-1.5-flash-001"
+    except:
+        return "gemini-1.5-flash-001"
     """Отправляет запрос в Gemini API"""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
     if not api_key:
@@ -363,22 +383,16 @@ Keep response under 400 words.
 
     try:
         import requests as req
-        # Пробуем gemini-2.0-flash, потом fallback на gemini-1.5-flash
-        for model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            response = req.post(url, json=payload, timeout=30)
-            result = response.json()
+        model = get_available_gemini_model(api_key)
+        st.caption(f"🤖 Модель: `{model}`")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        response = req.post(url, json=payload, timeout=30)
+        result = response.json()
 
-            # Если API вернул ошибку — пробуем следующую модель
-            if "error" in result:
-                continue
+        if "candidates" in result and result["candidates"]:
+            return result["candidates"][0]["content"]["parts"][0]["text"]
 
-            # Успех
-            if "candidates" in result and result["candidates"]:
-                return result["candidates"][0]["content"]["parts"][0]["text"]
-
-        # Если все модели не сработали — показываем что ответил сервер
         return f"Error: API response: {result}"
 
     except Exception as e:
@@ -396,6 +410,19 @@ def render_ai_section(df: pd.DataFrame, T: dict, theme: dict, lang: str):
             st.code('GEMINI_API_KEY = "AIzaSy..."', language="toml")
             st.markdown("Streamlit Cloud → **Settings → Secrets**")
         return
+
+    # Показываем доступные модели для диагностики
+    with st.expander("🔍 Доступные модели Gemini для вашего ключа"):
+        try:
+            import requests as req
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+            resp = req.get(url, timeout=10)
+            models_list = resp.json().get("models", [])
+            for m in models_list:
+                if "generateContent" in m.get("supportedGenerationMethods", []):
+                    st.markdown(f"✅ `{m['name'].replace('models/','')}`")
+        except Exception as e:
+            st.error(f"Ошибка: {e}")
 
     data_summary = build_data_summary(df, lang)
 
