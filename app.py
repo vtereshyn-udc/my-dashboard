@@ -337,26 +337,27 @@ TOP 5 ASINs BY SALES:
 
 
 def get_available_gemini_model(api_key: str) -> str:
-    """Находит первую доступную модель Gemini для generateContent"""
-    try:
-        import requests as req
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-        resp = req.get(url, timeout=10)
-        models = resp.json().get("models", [])
-        # Фильтруем те что поддерживают generateContent, предпочитаем flash
-        supported = [
-            m["name"].replace("models/", "")
-            for m in models
-            if "generateContent" in m.get("supportedGenerationMethods", [])
-            and "flash" in m["name"]
-        ]
-        # Сортируем: 2.0 > 1.5, lite в конце
-        preferred = sorted(supported, key=lambda x: (
-            "2.0" not in x, "1.5" not in x, "lite" in x
-        ))
-        return preferred[0] if preferred else "gemini-1.5-flash-001"
-    except:
-        return "gemini-1.5-flash-001"
+    """Берёт список моделей прямо из API и возвращает лучшую flash"""
+    import requests as req
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    resp = req.get(url, timeout=10)
+    models = resp.json().get("models", [])
+    supported = [
+        m["name"].replace("models/", "")
+        for m in models
+        if "generateContent" in m.get("supportedGenerationMethods", [])
+        and "flash" in m["name"]
+    ]
+    # Предпочитаем 2.0, потом 1.5, lite в конце
+    preferred = sorted(supported, key=lambda x: (
+        "2.0" not in x, "1.5" not in x, "lite" in x
+    ))
+    if not preferred:
+        raise Exception(f"Нет доступных flash-моделей. Все модели: {[m['name'] for m in models]}")
+    return preferred[0]
+
+
+def ask_gemini(data_summary: str, user_question: str, lang: str) -> str:
     """Отправляет запрос в Gemini API"""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
     if not api_key:
@@ -389,14 +390,13 @@ Keep response under 400 words.
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         response = req.post(url, json=payload, timeout=30)
         result = response.json()
-
         if "candidates" in result and result["candidates"]:
             return result["candidates"][0]["content"]["parts"][0]["text"]
-
         return f"Error: API response: {result}"
-
     except Exception as e:
         return f"Error: {e}"
+
+
 
 
 def render_ai_section(df: pd.DataFrame, T: dict, theme: dict, lang: str):
