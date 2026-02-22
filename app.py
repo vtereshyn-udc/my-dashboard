@@ -237,23 +237,15 @@ def apply_theme(t):
             background-color: {t['card_border']} !important;
         }}
 
-        /* Кнопки — агрессивный фикс */
-        button[kind="secondary"], button[kind="secondaryFormSubmit"],
         .stButton button, div.stButton > button {{
-            background-color: {input_bg} !important;
-            color: {input_text} !important;
-            border: 1px solid {t['card_border']} !important;
+            background-color: #e03131 !important;
+            color: #ffffff !important;
+            border: none !important;
             font-weight: 500 !important;
         }}
         .stButton button:hover, div.stButton > button:hover {{
-            border-color: {t['metric_val']} !important;
-            color: {t['metric_val']} !important;
-            background-color: {input_bg} !important;
-        }}
-        button[kind="primary"], div.stButton > button[kind="primary"] {{
-            background-color: {t['metric_val']} !important;
+            background-color: #c92a2a !important;
             color: #ffffff !important;
-            border: none !important;
         }}
 
         hr {{ border-color: {t['hr']}; }}
