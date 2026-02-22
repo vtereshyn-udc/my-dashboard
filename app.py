@@ -283,7 +283,7 @@ def build_data_summary(df: pd.DataFrame, lang: str) -> str:
             cvr=('unit_session_percentage','mean'),
             buybox=('buy_box_percentage','mean'),
             title=('title','first'),
-        ).sort_values('sales', ascending=False).head(5)
+        ).reset_index().sort_values('sales', ascending=False).head(5)
     )
 
     total_sales   = df['ordered_product_sales'].sum()
