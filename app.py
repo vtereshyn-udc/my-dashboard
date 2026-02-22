@@ -218,6 +218,25 @@ def apply_theme(t):
         p, span, div {{ color: {t['text']}; }}
         .stMarkdown p {{ color: {t['text']} !important; }}
 
+        /* Выпадающий список — опции */
+        [data-testid="stSidebar"] ul[data-testid="stSelectboxVirtualDropdown"] {{
+            background-color: {input_bg} !important;
+        }}
+        [data-testid="stSidebar"] ul li span {{
+            color: {input_text} !important;
+        }}
+        /* Общий фикс для всех дропдаунов */
+        div[data-baseweb="popover"] ul {{
+            background-color: {input_bg} !important;
+        }}
+        div[data-baseweb="popover"] ul li {{
+            background-color: {input_bg} !important;
+            color: {input_text} !important;
+        }}
+        div[data-baseweb="popover"] ul li:hover {{
+            background-color: {t['card_border']} !important;
+        }}
+
         hr {{ border-color: {t['hr']}; }}
         .ai-box {{
             background: {t['ai_bg']};
