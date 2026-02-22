@@ -363,12 +363,24 @@ Keep response under 400 words.
 
     try:
         import requests as req
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        response = req.post(url, json=payload, timeout=30)
-        result = response.json()
-        text = result["candidates"][0]["content"]["parts"][0]["text"]
-        return text
+        # Пробуем gemini-2.0-flash, потом fallback на gemini-1.5-flash
+        for model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            response = req.post(url, json=payload, timeout=30)
+            result = response.json()
+
+            # Если API вернул ошибку — пробуем следующую модель
+            if "error" in result:
+                continue
+
+            # Успех
+            if "candidates" in result and result["candidates"]:
+                return result["candidates"][0]["content"]["parts"][0]["text"]
+
+        # Если все модели не сработали — показываем что ответил сервер
+        return f"Error: API response: {result}"
+
     except Exception as e:
         return f"Error: {e}"
 
