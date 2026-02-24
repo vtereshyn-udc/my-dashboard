@@ -408,64 +408,108 @@ TOP 5 ASINs BY SALES:
     return summary
 
 
-def ask_gemini(data_summary: str, user_question: str, lang: str) -> str:
-    """Отправляет запрос в Gemini API — перебирает модели пока одна не сработает"""
+def call_gemini(prompt: str) -> str:
+    """Базовый вызов Gemini API"""
+    import requests as req
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
-        return None
+    MODELS = [
+        st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        "gemini-2.0-flash",
+        "gemini-flash-latest",
+    ]
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    for model in MODELS:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            r = req.post(url, json=payload, timeout=45)
+            result = r.json()
+            if "error" in result:
+                continue
+            if "candidates" in result and result["candidates"]:
+                return result["candidates"][0]["content"]["parts"][0]["text"], model
+        except Exception:
+            continue
+    return None, None
 
+
+def ai_generate_sql(user_question: str, lang: str, days_back: int) -> str:
+    """Шаг 1: Gemini генерирует SQL запрос"""
+    date_from = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+
+    prompt = f"""You are a PostgreSQL expert working with Amazon SP-API data.
+
+Table: spapi.sales_traffic_report
+Columns:
+  date DATE
+  parent_asin TEXT, child_asin TEXT, title TEXT, sku TEXT
+  sessions INT, sessions_b2b INT
+  browser_sessions INT, mobile_app_sessions INT
+  page_views INT, page_views_b2b INT
+  browser_page_views INT, mobile_app_page_views INT
+  buy_box_percentage NUMERIC, buy_box_percentage_b2b NUMERIC
+  unit_session_percentage NUMERIC (this is CVR)
+  unit_session_percentage_b2b NUMERIC
+  units_ordered INT, units_ordered_b2b INT
+  ordered_product_sales NUMERIC
+  ordered_product_sales_b2b NUMERIC
+  total_order_items INT, total_order_items_b2b INT
+
+Data available from: {date_from} to today.
+
+User question: "{user_question}"
+
+Write ONE SQL SELECT query to answer this question.
+- Use WHERE date >= '{date_from}'
+- Return maximum 50 rows
+- ONLY return the SQL query, no explanation, no markdown, no ```sql blocks
+- Just pure SQL starting with SELECT"""
+
+    sql, _ = call_gemini(prompt)
+    if sql:
+        # Очищаем от markdown если вдруг прокрался
+        sql = sql.strip()
+        sql = sql.replace("```sql", "").replace("```", "").strip()
+    return sql
+
+
+def ai_analyze_results(user_question: str, sql: str, df_result: pd.DataFrame, lang: str) -> tuple:
+    """Шаг 3: Gemini анализирует результаты SQL"""
     lang_instruction = {
         "RU": "Отвечай на русском языке.",
         "UA": "Відповідай українською мовою.",
         "EN": "Respond in English.",
     }.get(lang, "Respond in English.")
 
+    # Конвертируем результат в текст для промпта
+    if len(df_result) > 30:
+        data_str = df_result.head(30).to_string(index=False) + f"\n... (showing 30 of {len(df_result)} rows)"
+    else:
+        data_str = df_result.to_string(index=False)
+
     prompt = f"""You are an expert Amazon seller analytics consultant.
 {lang_instruction}
 
-Here is the Sales & Traffic data summary for analysis:
-{data_summary}
+User asked: "{user_question}"
 
-User question: {user_question}
+SQL query executed:
+{sql}
 
-Provide a concise, actionable analysis. Use bullet points where helpful.
-Focus on: key trends, anomalies, specific ASIN insights, and concrete recommendations.
-Keep response under 400 words.
-"""
+Query results:
+{data_str}
 
-    # Модель берётся из Secrets → GEMINI_MODEL, иначе дефолт
-    MODELS = [
-        st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash"),
-        "gemini-2.0-flash",
-        "gemini-flash-latest",
-    ]
+Analyze these results and provide:
+1. Direct answer to the user's question
+2. Key insights from the data
+3. Concrete actionable recommendations
 
-    import requests as req
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+Use bullet points. Be specific with numbers from the data. Keep under 350 words."""
 
-    for model in MODELS:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            response = req.post(url, json=payload, timeout=30)
-            result = response.json()
-
-            if "error" in result:
-                continue  # эта модель недоступна → пробуем следующую
-
-            if "candidates" in result and result["candidates"]:
-                st.caption(f"🤖 Модель: `{model}`")
-                return result["candidates"][0]["content"]["parts"][0]["text"]
-
-        except Exception:
-            continue
-
-    return "Error: ни одна модель не доступна для вашего API ключа"
+    answer, model = call_gemini(prompt)
+    return answer, model
 
 
-
-
-def render_ai_section(df: pd.DataFrame, T: dict, theme: dict, lang: str):
-    """Блок AI-инсайтов"""
+def render_ai_section(df: pd.DataFrame, T: dict, theme: dict, lang: str, days_back: int = 30):
+    """Блок AI Level 3 — AI пишет SQL и анализирует результаты"""
     st.markdown(f"### {T['ai_section']}")
 
     api_key = st.secrets.get("GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
@@ -476,53 +520,33 @@ def render_ai_section(df: pd.DataFrame, T: dict, theme: dict, lang: str):
             st.markdown("Streamlit Cloud → **Settings → Secrets**")
         return
 
-    # Показываем доступные модели для диагностики
-    with st.expander("🔍 Доступные модели Gemini для вашего ключа"):
-        try:
-            import requests as req
-            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-            resp = req.get(url, timeout=10)
-            models_list = resp.json().get("models", [])
-            for m in models_list:
-                if "generateContent" in m.get("supportedGenerationMethods", []):
-                    st.markdown(f"✅ `{m['name'].replace('models/','')}`")
-        except Exception as e:
-            st.error(f"Ошибка: {e}")
-
-    data_summary = build_data_summary(df, lang)
-
-    # Быстрые кнопки-вопросы
-    col1, col2, col3 = st.columns(3)
-
     quick_questions = {
         "RU": [
-            "Проанализируй тренды продаж и выяви аномалии",
-            "Какие ASIN показывают низкий Buy Box и что с этим делать?",
-            "Где самый высокий CVR и почему? Дай рекомендации",
+            "Какой ASIN вырос больше всех за последние 7 дней?",
+            "Какие ASIN имеют Buy Box ниже 80% — покажи и объясни",
+            "Где CVR выше среднего и почему? Топ 5 ASIN",
         ],
         "UA": [
-            "Проаналізуй тренди продажів та знайди аномалії",
-            "Які ASIN мають низький Buy Box і що з цим робити?",
-            "Де найвищий CVR і чому? Дай рекомендації",
+            "Який ASIN виріс найбільше за останні 7 днів?",
+            "Які ASIN мають Buy Box нижче 80% — покажи і поясни",
+            "Де CVR вище середнього і чому? Топ 5 ASIN",
         ],
         "EN": [
-            "Analyze sales trends and identify anomalies",
-            "Which ASINs have low Buy Box and what to do?",
-            "Where is the highest CVR and why? Give recommendations",
+            "Which ASIN grew the most in the last 7 days?",
+            "Which ASINs have Buy Box below 80%? Show and explain",
+            "Where is CVR above average and why? Top 5 ASINs",
         ],
     }
-
     questions = quick_questions.get(lang, quick_questions["EN"])
 
-    btn1 = col1.button(f"📈 {questions[0][:35]}...", use_container_width=True)
-    btn2 = col2.button(f"🏆 {questions[1][:35]}...", use_container_width=True)
-    btn3 = col3.button(f"🎯 {questions[2][:35]}...", use_container_width=True)
+    col1, col2, col3 = st.columns(3)
+    btn1 = col1.button(f"📈 {questions[0][:32]}...", use_container_width=True)
+    btn2 = col2.button(f"🏆 {questions[1][:32]}...", use_container_width=True)
+    btn3 = col3.button(f"🎯 {questions[2][:32]}...", use_container_width=True)
 
-    # Своей вопрос
     user_q = st.text_input(T['ai_prompt_label'], placeholder=T['ai_prompt_placeholder'])
     ask_btn = st.button(T['ai_ask'], type="primary")
 
-    # Определяем финальный вопрос
     final_question = None
     if btn1: final_question = questions[0]
     elif btn2: final_question = questions[1]
@@ -530,13 +554,44 @@ def render_ai_section(df: pd.DataFrame, T: dict, theme: dict, lang: str):
     elif ask_btn and user_q: final_question = user_q
 
     if final_question:
-        with st.spinner(T['ai_loading']):
-            answer = ask_gemini(data_summary, final_question, lang)
+        # ШАГ 1: Генерируем SQL
+        with st.spinner("🔍 AI составляет SQL запрос..."):
+            sql = ai_generate_sql(final_question, lang, days_back)
 
-        if answer and not answer.startswith("Error"):
+        if not sql:
+            st.error(f"{T['ai_error']}: не удалось сгенерировать SQL")
+            return
+
+        # Показываем SQL пользователю
+        with st.expander("🔎 SQL запрос от AI"):
+            st.code(sql, language="sql")
+
+        # ШАГ 2: Выполняем SQL
+        with st.spinner("⚡ Выполняем запрос к БД..."):
+            try:
+                with get_engine().connect() as conn:
+                    df_result = pd.read_sql(text(sql), conn)
+            except Exception as e:
+                st.error(f"❌ Ошибка SQL: {e}")
+                return
+
+        if df_result.empty:
+            st.warning("⚠️ Запрос вернул пустой результат")
+            return
+
+        # Показываем таблицу результатов
+        with st.expander(f"📊 Данные из БД ({len(df_result)} строк)"):
+            st.dataframe(df_result, use_container_width=True)
+
+        # ШАГ 3: AI анализирует результаты
+        with st.spinner(T['ai_loading']):
+            answer, model = ai_analyze_results(final_question, sql, df_result, lang)
+
+        if answer:
+            st.caption(f"🤖 Модель: `{model}`")
             st.markdown(f'<div class="ai-box">{answer}</div>', unsafe_allow_html=True)
         else:
-            st.error(f"{T['ai_error']}: {answer}")
+            st.error(T['ai_error'])
 
 
 # ============================================================
@@ -749,7 +804,7 @@ def main():
 
     if show_ai:
         st.divider()
-        render_ai_section(df, T, theme, lang)
+        render_ai_section(df, T, theme, lang, days_back)
 
     with st.expander(T['info']):
         c1,c2,c3,c4 = st.columns(4)
