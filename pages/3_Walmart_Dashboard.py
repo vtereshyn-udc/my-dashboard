@@ -635,7 +635,7 @@ def build_action_items(data, lang: str) -> list:
                     "UA": "Терміново поповнити запас цих SKU або виставити quantity_available=0",
                     "EN": "Urgently restock these SKUs or set quantity_available=0"
                 }[lang],
-                "owner": "Логистика / Liubov",
+                "owner": "Логистика",
                 "skus": rep["catalog_item_id"].tolist(),
             })
 
