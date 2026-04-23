@@ -541,7 +541,7 @@ def build_action_items(data, lang: str) -> list:
                     "UA": "Підняти Min Allowed Price або ціну лістингу на 15-20%",
                     "EN": "Raise Min Allowed Price or listing price by 15-20%"
                 }[lang],
-                "owner": "Прайсинг / Роман",
+                "owner": "Прайсинг",
                 "skus": heavy_cut["sku"].tolist(),
             })
 
