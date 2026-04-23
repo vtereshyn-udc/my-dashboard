@@ -32,7 +32,7 @@ st.set_page_config(
 
 TRANSLATIONS = {
     "EN": {
-        "title": "🏪 Walmart Dashboard — UDC Mower Parts",
+        "title": "🏪 Walmart Dashboard — UDC Parts",
         "refresh": "🔄 Refresh",
         "sections": "📊 Sections",
         "loading": "Loading data...",
@@ -116,7 +116,7 @@ TRANSLATIONS = {
         "ai_result_expander": "📊 Data from database",
     },
     "UA": {
-        "title": "🏪 Walmart Дашборд — UDC Mower Parts",
+        "title": "🏪 Walmart Дашборд — UDC Parts",
         "refresh": "🔄 Оновити",
         "sections": "📊 Розділи",
         "loading": "Завантажуємо дані...",
@@ -192,7 +192,7 @@ TRANSLATIONS = {
         "ai_result_expander": "📊 Дані з бази",
     },
     "RU": {
-        "title": "🏪 Walmart Дашборд — UDC Mower Parts",
+        "title": "🏪 Walmart Дашборд — UDC Parts",
         "refresh": "🔄 Обновить",
         "sections": "📊 Разделы",
         "loading": "Загружаем данные...",
@@ -1022,7 +1022,7 @@ Columns: report_date DATE, sku, campaign_name, ad_group_name,
 
 
 def ai_generate_sql(user_question: str, lang: str) -> str:
-    prompt = f"""You are a PostgreSQL expert working with Walmart Marketplace data for UDC Mower Parts LLC (lawn mower parts seller).
+    prompt = f"""You are a PostgreSQL expert working with Walmart Marketplace data for UDC Parts LLC (lawn Parts seller).
 
 {SCHEMA_DESCRIPTION}
 
