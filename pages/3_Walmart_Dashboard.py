@@ -614,7 +614,7 @@ def build_action_items(data, lang: str) -> list:
                     "UA": "Ревью лістингів: оновити фото, опис, ключові слова або зняти",
                     "EN": "Listing review: update photos, copy, keywords, or remove"
                 }[lang],
-                "owner": "Контент / Анна (PPC)",
+                "owner": "Контент",
                 "skus": dead["sku"].tolist()[:10],
             })
 
