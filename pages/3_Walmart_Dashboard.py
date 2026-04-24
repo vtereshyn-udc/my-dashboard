@@ -494,7 +494,7 @@ def build_action_items(data, lang: str) -> list:
                     act_ru = "Подтвердить бренд UDC Parts в Brand Portal"
                     act_ua = "Підтвердити бренд UDC Parts в Brand Portal"
                     act_en = "Confirm UDC Parts brand in Brand Portal"
-                    owner = "Женя / Операторы"
+                    owner = "Операторы"
                 elif "Product Type" in reason_str or "Default" in reason_str:
                     act_ru = "Назначить правильную категорию (Mower Blade / Belt) в листинге"
                     act_ua = "Призначити правильну категорію (Mower Blade / Belt) у лістингу"
