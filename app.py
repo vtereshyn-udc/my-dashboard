@@ -13,7 +13,7 @@ st.markdown("""
 
 Choose a dashboard from the sidebar ←
 
-- 📈 **Amazon Dashboard** — Sales & Traffic analytics for merino.tech and other Amazon brands
+- 📈 **Amazon Dashboard** — Sales & Traffic analytics for  and other Amazon brands
 - 🏪 **Walmart Dashboard** — Walmart Marketplace data for UDC Mower Parts LLC
 
 Data is updated automatically twice a day via ETL pipeline.
