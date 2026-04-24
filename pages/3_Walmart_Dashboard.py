@@ -116,7 +116,7 @@ TRANSLATIONS = {
         "ai_result_expander": "📊 Data from database",
     },
     "UA": {
-        "title": "🏪 Walmart Дашборд — UDC Mower Parts",
+        "title": "🏪 Walmart Дашборд — UDC  Parts",
         "refresh": "🔄 Оновити",
         "sections": "📊 Розділи",
         "loading": "Завантажуємо дані...",
