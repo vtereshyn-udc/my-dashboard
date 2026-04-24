@@ -13,8 +13,8 @@ st.markdown("""
 
 Choose a dashboard from the sidebar ←
 
-- 📈 **Amazon Dashboard** — Sales & Traffic analytics for  and other Amazon brands
-- 🏪 **Walmart Dashboard** — Walmart Marketplace data for UDC Mower Parts LLC
+- 📈 **Amazon Dashboard** — Sales & Traffic analytics for  and other Amazon UDC Parts LLC
+- 🏪 **Walmart Dashboard** — Walmart Marketplace data for UDC Parts LLC
 
 Data is updated automatically twice a day via ETL pipeline.
 """)
