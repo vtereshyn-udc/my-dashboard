@@ -418,11 +418,9 @@ def call_gemini(prompt: str) -> str:
     """Базовый вызов Gemini API"""
     import requests as req
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
-    MODELS = [
-        st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash"),
-        "gemini-2.0-flash",
-        "gemini-flash-latest",
-    ]
+    
+   MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     for model in MODELS:
         try:
