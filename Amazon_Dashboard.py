@@ -413,22 +413,26 @@ TOP 5 ASINs BY SALES:
 """
     return summary
 
-def call_gemini(prompt: str) -> str:
+def call_gemini(prompt: str):
     """Базовый вызов Gemini API"""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
     MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    
     for model in MODELS:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             r = req.post(url, json=payload, timeout=45)
             result = r.json()
+            
             if "error" in result:
                 continue
+                
             if "candidates" in result and result["candidates"]:
                 return result["candidates"][0]["content"]["parts"][0]["text"], model
         except Exception:
             continue
+            
     return None, None
 
 
