@@ -26,7 +26,7 @@ st.markdown("""
 <style>
 header[data-testid="stHeader"] { display: none !important; }
 </style>
-""", unsafe_allow_html=True) 
+""", unsafe_allow_html=True)
 
 TABLE = "spapi.sales_traffic_report"
 
