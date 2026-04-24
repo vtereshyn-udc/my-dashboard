@@ -541,7 +541,7 @@ def build_action_items(data, lang: str) -> list:
                     "UA": "Підняти Min Allowed Price або ціну лістингу на 15-20%",
                     "EN": "Raise Min Allowed Price or listing price by 15-20%"
                 }[lang],
-                "owner": "Прайсинг / Роман",
+                "owner": "Прайсинг",
                 "skus": heavy_cut["sku"].tolist(),
             })
 
@@ -614,7 +614,7 @@ def build_action_items(data, lang: str) -> list:
                     "UA": "Ревью лістингів: оновити фото, опис, ключові слова або зняти",
                     "EN": "Listing review: update photos, copy, keywords, or remove"
                 }[lang],
-                "owner": "Контент / Анна (PPC)",
+                "owner": "Контент",
                 "skus": dead["sku"].tolist()[:10],
             })
 
@@ -635,7 +635,7 @@ def build_action_items(data, lang: str) -> list:
                     "UA": "Терміново поповнити запас цих SKU або виставити quantity_available=0",
                     "EN": "Urgently restock these SKUs or set quantity_available=0"
                 }[lang],
-                "owner": "Логистика / Liubov",
+                "owner": "Логистика",
                 "skus": rep["catalog_item_id"].tolist(),
             })
 
