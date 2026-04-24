@@ -412,11 +412,16 @@ TOP 5 ASINs BY SALES:
 {top_list}
 """
     return summary
-
 def call_gemini(prompt: str):
     """Базовый вызов Gemini API"""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
-    MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    
+    # Сначала берем модель из Secrets, если ее нет — используем 2.0-flash как основную
+    user_model = st.secrets.get("GEMINI_MODEL", "gemini-2.0-flash")
+    
+    # Список моделей для перебора (твоя — первая в списке)
+    MODELS = [user_model, "gemini-1.5-flash", "gemini-1.5-pro"]
+    
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
     for model in MODELS:
@@ -429,6 +434,7 @@ def call_gemini(prompt: str):
                 continue
                 
             if "candidates" in result and result["candidates"]:
+                # Возвращаем текст и модель, которая ответила
                 return result["candidates"][0]["content"]["parts"][0]["text"], model
         except Exception:
             continue
