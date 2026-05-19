@@ -408,9 +408,11 @@ def load_walmart_data():
     eng = get_engine()
     data = {}
     queries = {
-        "items": "SELECT * FROM walmart.items",
-        "performance": "SELECT * FROM walmart.item_performance",
-        "inventory": "SELECT * FROM walmart.inventory_report",
+        "items":         "SELECT * FROM walmart.items",
+        "performance":   "SELECT * FROM walmart.item_performance WHERE report_date >= CURRENT_DATE - INTERVAL '30 days'",
+        "inventory":     "SELECT * FROM walmart.inventory_report",       # legacy, лишаємо
+        "inventory_new": "SELECT * FROM walmart.inventory",               # 🆕 наша 49-cols
+        "wfs_shipments": "SELECT * FROM walmart.wfs_shipments",           # 🆕 для inbound details
         "buybox": "SELECT * FROM walmart.buybox",
         "cancellations": "SELECT * FROM walmart.cancellations ORDER BY cancel_date DESC NULLS LAST",
         "report_runs": "SELECT * FROM walmart.report_runs ORDER BY started_at DESC LIMIT 30",
