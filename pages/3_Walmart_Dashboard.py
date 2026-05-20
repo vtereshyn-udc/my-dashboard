@@ -1,16 +1,18 @@
 """
-Walmart Reports Dashboard v3.3 — PARTNER-LEVEL AI Briefing
-ЗМІНИ vs v3.2:
-- 🆕 AI промпт переписано на SENIOR PARTNER level (McKinsey/BCG tone)
-- Додано industry benchmarks (margin 35-50%, return rate 5-8%, TACoS 8-15%)
-- 7 секцій briefing: Situation → Strategic Thesis → Top-3 Moves →
-  Material Risks → Upside Levers → The One Metric → Board Question
-- Преміальний дизайн (gradient background, заголовок Confidential)
-- Temperature 0.7 + maxOutputTokens 1500 для глибших інсайтів
+Walmart Reports Dashboard v3.4 — STORAGE COSTS додано
+ЗМІНИ vs v3.3:
+- 🆕 РОЗДІЛ "💾 Storage Costs (WFS)" в категорії "💵 Продажі та гроші"
+- Storage fees приходять з walmart.settlement (вже v1!)
+   Не потрібен окремий loader — все вже в БД
+- KPI: Total, Monthly avg, LongTerm %, % of Sales, Q4 forecast (×3)
+- Графіки: monthly stacked, storage vs sales з % overlay
+- Insights: dead stock warning, Q4 peak rates, growth spike
+- Storage додано в AI snapshot — Gemini знає про storage costs
+- В Overview додано Storage KPI
 
-v3.2: AI Executive Briefing у Overview
-v3.1: SMART BI 7-section structure
-v3.0: Категорії + 3 режими
+v3.3: Partner-Level AI Briefing
+v3.2: AI Executive Briefing
+v3.1: SMART BI structure
 """
 
 import streamlit as st
@@ -153,6 +155,21 @@ TRANSLATIONS = {
         "returns_date": "Date", "returns_carrier": "Carrier",
         "returns_fix_listings": "💡 LISTING FIX OPPORTUNITY",
         "returns_fix_text": "% of returns due to listing issues (compatibility / wrong item / description)",
+
+        # 🆕 Storage Costs
+        "storage_section": "💾 Storage Costs (WFS)",
+        "storage_subtitle": "WFS warehouse storage fees — Standard, LongTerm, peak season",
+        "storage_total": "Total Storage (lifetime)",
+        "storage_monthly_avg": "Monthly Average",
+        "storage_lt_pct": "LongTerm %",
+        "storage_pct_sales": "% of Sales",
+        "storage_q4_forecast": "Q4 Forecast (×3)",
+        "storage_monthly_trend": "Monthly Storage Costs",
+        "storage_vs_sales": "Storage as % of Sales",
+        "storage_recent": "Recent Storage Charges",
+        "storage_period": "Period",
+        "storage_type": "Type",
+        "storage_amount": "Amount",
 
         # 🆕 Orders
         "orders_section": "📦 Orders / Sales",
@@ -297,6 +314,21 @@ TRANSLATIONS = {
         "returns_fix_listings": "💡 МОЖЛИВІСТЬ ФІКС ЛІСТИНГІВ",
         "returns_fix_text": "% повернень через проблеми з лістингом",
 
+        # 🆕 Storage Costs
+        "storage_section": "💾 Storage Costs (WFS)",
+        "storage_subtitle": "WFS складські витрати — Standard, LongTerm, peak сезон",
+        "storage_total": "Всього Storage (lifetime)",
+        "storage_monthly_avg": "Середньо/місяць",
+        "storage_lt_pct": "LongTerm %",
+        "storage_pct_sales": "% від Sales",
+        "storage_q4_forecast": "Q4 прогноз (×3)",
+        "storage_monthly_trend": "Місячні витрати на storage",
+        "storage_vs_sales": "Storage як % від Sales",
+        "storage_recent": "Останні нарахування storage",
+        "storage_period": "Період",
+        "storage_type": "Тип",
+        "storage_amount": "Сума",
+
         # 🆕 Orders
         "orders_section": "📦 Замовлення / Продажі",
         "orders_subtitle": "Замовлення клієнтів, щоденні продажі, ТОП покупці, штати доставки",
@@ -437,6 +469,21 @@ TRANSLATIONS = {
         "returns_date": "Дата", "returns_carrier": "Carrier",
         "returns_fix_listings": "💡 ВОЗМОЖНОСТЬ FIX ЛИСТИНГОВ",
         "returns_fix_text": "% возвратов из-за проблем с листингом",
+
+        # 🆕 Storage Costs
+        "storage_section": "💾 Storage Costs (WFS)",
+        "storage_subtitle": "WFS складские расходы — Standard, LongTerm, peak сезон",
+        "storage_total": "Всего Storage (lifetime)",
+        "storage_monthly_avg": "Среднее/месяц",
+        "storage_lt_pct": "LongTerm %",
+        "storage_pct_sales": "% от Sales",
+        "storage_q4_forecast": "Q4 прогноз (×3)",
+        "storage_monthly_trend": "Месячные расходы на storage",
+        "storage_vs_sales": "Storage как % от Sales",
+        "storage_recent": "Последние начисления storage",
+        "storage_period": "Период",
+        "storage_type": "Тип",
+        "storage_amount": "Сумма",
 
         # 🆕 Orders
         "orders_section": "📦 Заказы / Продажи",
@@ -674,6 +721,246 @@ def kpi_row(data, T):
     c4.metric(T["bb_win"], f"{bb_pct:.1f}%")
     c5.metric(T["cap_skus"], f"{int(cap_skus)}")
     c6.metric(T["problems"], f"{int(problems)}")
+
+
+# ============================================================
+# 💾 STORAGE COSTS SECTION 🆕
+# ============================================================
+
+def render_storage(data, T, theme):
+    """💎 SMART STORAGE — WFS storage fees аналіз з peak season forecast."""
+    settle = data.get("settlement", pd.DataFrame())
+    if settle.empty:
+        st.warning("⚠️ walmart.settlement is empty")
+        return
+
+    st.markdown(f"### {T['storage_section']}")
+    st.caption(T["storage_subtitle"])
+
+    # Фільтруємо тільки storage
+    settle["report_date"] = pd.to_datetime(settle["report_date"], errors='coerce', utc=True).dt.tz_localize(None)
+    settle["amount"] = pd.to_numeric(settle["amount"], errors='coerce').fillna(0)
+
+    storage = settle[
+        (settle["transaction_type"] == "Service Fee") &
+        (settle["transaction_description"].str.contains("Storage", case=False, na=False))
+    ].copy()
+
+    if storage.empty:
+        st.warning("⚠️ Storage fees не знайдено в settlement. Перевір що loader тягне v1.")
+        return
+
+    storage["abs_amount"] = storage["amount"].abs()
+    storage["month"] = storage["report_date"].dt.to_period("M").dt.to_timestamp()
+
+    is_lt = storage["transaction_description"].str.contains("LongTerm", case=False, na=False)
+    storage["category"] = "Standard"
+    storage.loc[is_lt, "category"] = "LongTerm"
+
+    # ============ 1. EXECUTIVE SUMMARY ============
+    total_storage = storage["abs_amount"].sum()
+    lt_amount = storage[storage["category"] == "LongTerm"]["abs_amount"].sum()
+    std_amount = storage[storage["category"] == "Standard"]["abs_amount"].sum()
+    lt_pct = (lt_amount / max(total_storage, 1)) * 100
+
+    # 3-month average
+    cutoff_3mo = pd.Timestamp(datetime.now().date() - timedelta(days=90))
+    storage_3mo = storage[storage["report_date"] >= cutoff_3mo]
+    if not storage_3mo.empty:
+        monthly_avg = storage_3mo.groupby("month")["abs_amount"].sum().mean()
+    else:
+        monthly_avg = total_storage / max(storage["month"].nunique(), 1)
+
+    # Sales для % calculation
+    sales = settle[settle["transaction_type"] == "Sale"]
+    sales["month"] = sales["report_date"].dt.to_period("M").dt.to_timestamp()
+
+    monthly_storage = storage.groupby("month")["abs_amount"].sum().reset_index()
+    monthly_sales = sales.groupby("month")["amount"].sum().reset_index()
+    monthly_combined = monthly_sales.merge(monthly_storage, on="month", how="left").fillna(0)
+    monthly_combined["pct"] = (monthly_combined["abs_amount"] / monthly_combined["amount"] * 100).fillna(0)
+
+    avg_pct = monthly_combined["pct"].mean() if not monthly_combined.empty else 0
+
+    q4_forecast = monthly_avg * 3 * 3  # 3 months × 3x peak rate
+
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(250,176,5,0.10), rgba(224,49,49,0.08));
+                border-left: 4px solid #fab005; padding: 14px 18px; border-radius: 8px;
+                margin: 8px 0 16px 0;">
+        <strong style="font-size:1.05rem;">💾 Storage Cost Analysis</strong><br>
+        <span style="opacity:0.9;">
+        Всього виплачено за storage: <b>${total_storage:,.2f}</b> ({storage['month'].nunique()} місяців).
+        Середньо: <b>${monthly_avg:,.0f}/місяць</b> ({avg_pct:.1f}% від sales).<br>
+        LongTerm fees: <b>{lt_pct:.0f}%</b> від storage costs
+        {('— це <b>вище індустріальної норми (<10%)</b>, маєш dead stock який треба розпродати.' if lt_pct > 15 else '— в нормі.')}<br>
+        ⚠️ <b>Q4 forecast:</b> ~${q4_forecast:,.0f} (peak rates ×3 в Oct-Dec).
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ============ 2. KPI ============
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric(T["storage_total"], f"${total_storage:,.0f}")
+    c2.metric(T["storage_monthly_avg"], f"${monthly_avg:,.0f}")
+    c3.metric(T["storage_lt_pct"], f"{lt_pct:.0f}%")
+    c4.metric(T["storage_pct_sales"], f"{avg_pct:.1f}%")
+    c5.metric(T["storage_q4_forecast"], f"${q4_forecast:,.0f}")
+
+    st.divider()
+
+    # ============ 3. MONTHLY TREND ============
+    st.markdown(f"#### 📊 {T['storage_monthly_trend']}")
+
+    monthly_breakdown = storage.groupby(["month", "category"])["abs_amount"].sum().reset_index()
+
+    fig = px.bar(
+        monthly_breakdown,
+        x="month", y="abs_amount", color="category",
+        color_discrete_map={"Standard": "#fab005", "LongTerm": "#e03131"},
+        text="abs_amount",
+        barmode="stack",
+    )
+    fig.update_traces(texttemplate="$%{text:,.0f}", textposition="inside")
+    fig.update_layout(
+        height=400, template=theme["template"],
+        paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+        margin=dict(l=0, r=0, t=20, b=0),
+        yaxis_title="USD", xaxis_title="",
+        legend=dict(orientation="h", y=1.12),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ============ 4. STORAGE vs SALES ============
+    if not monthly_combined.empty and monthly_combined["pct"].sum() > 0:
+        st.markdown(f"#### 📈 {T['storage_vs_sales']}")
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=monthly_combined["month"], y=monthly_combined["amount"],
+            name="Sales $", marker_color="#51cf66", yaxis="y",
+        ))
+        fig.add_trace(go.Bar(
+            x=monthly_combined["month"], y=monthly_combined["abs_amount"],
+            name="Storage $", marker_color="#fab005", yaxis="y",
+        ))
+        fig.add_trace(go.Scatter(
+            x=monthly_combined["month"], y=monthly_combined["pct"],
+            name="Storage % of Sales", mode="lines+markers",
+            line=dict(color="#e03131", width=3), yaxis="y2",
+            marker=dict(size=8),
+        ))
+        fig.update_layout(
+            height=400, template=theme["template"],
+            paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+            margin=dict(l=0, r=0, t=20, b=0),
+            barmode="group",
+            yaxis=dict(title="USD"),
+            yaxis2=dict(title="% of Sales", overlaying="y", side="right",
+                        showgrid=False, ticksuffix="%"),
+            legend=dict(orientation="h", y=1.12),
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ============ 5. INSIGHTS ============
+    st.markdown("#### 🚨 Storage Insights")
+
+    insights = []
+
+    # 1. LongTerm storage
+    if lt_pct > 20:
+        insights.append({
+            "type": "crit",
+            "title": "🔴 High Long-Term Storage",
+            "text": f"<b>{lt_pct:.0f}%</b> storage costs це LongTerm — це означає inventory лежить >365 днів. "
+                    f"Загальна втрата: <b>${lt_amount:,.0f}</b>. Терміново розпродай dead stock через скидки.",
+        })
+    elif lt_pct > 10:
+        insights.append({
+            "type": "warn",
+            "title": "🟡 Long-Term Storage Trending Up",
+            "text": f"<b>{lt_pct:.0f}%</b> storage = LongTerm. Норма індустрії <10%. "
+                    f"Перевір aged inventory (>180 днів) і запусти promo.",
+        })
+
+    # 2. Storage as % of sales
+    if avg_pct > 5:
+        insights.append({
+            "type": "warn",
+            "title": "💸 Storage Eating Margin",
+            "text": f"Storage = <b>{avg_pct:.1f}%</b> від sales (норма 1-3%). "
+                    f"Більше товару ніж потрібно — оптимізуй inventory levels.",
+        })
+
+    # 3. Q4 warning
+    current_month = datetime.now().month
+    if current_month in [7, 8, 9]:  # Літо — попередження про Q4
+        insights.append({
+            "type": "info",
+            "title": "🍂 Q4 Approaching",
+            "text": f"Через {10 - current_month} місяців стартує Q4 peak season — Walmart підніме storage rates "
+                    f"<b>×3</b>. Прогноз: <b>${q4_forecast:,.0f}</b>. Подумай як зменшити inventory до жовтня.",
+        })
+    elif current_month in [10, 11, 12]:  # Зараз Q4
+        insights.append({
+            "type": "crit",
+            "title": "🔥 Q4 PEAK RATES ACTIVE",
+            "text": f"Жовтень-Грудень = ×3 rates! Кожен зайвий день storage коштує втричі більше. "
+                    f"Прогнозовано ${q4_forecast:,.0f} за квартал.",
+        })
+
+    # 4. Growth trend
+    if len(monthly_breakdown) >= 2:
+        monthly_totals = storage.groupby("month")["abs_amount"].sum().sort_index()
+        if len(monthly_totals) >= 2:
+            growth = ((monthly_totals.iloc[-1] - monthly_totals.iloc[-2]) / max(monthly_totals.iloc[-2], 1)) * 100
+            if growth > 50:
+                insights.append({
+                    "type": "warn",
+                    "title": "📈 Storage Spike",
+                    "text": f"Storage costs зросли <b>+{growth:.0f}%</b> місяць-до-місяця "
+                            f"(з ${monthly_totals.iloc[-2]:,.0f} до ${monthly_totals.iloc[-1]:,.0f}). "
+                            f"Можливо новий shipment або повільні продажі.",
+                })
+
+    if insights:
+        for ins in insights:
+            cls = {"crit": "severity-crit", "warn": "severity-warn", "info": "severity-info"}[ins["type"]]
+            st.markdown(f"""
+            <div class="{cls}">
+                <strong>{ins['title']}</strong><br>
+                <span style="opacity:0.9;">{ins['text']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.success("✅ Storage costs within normal range.")
+
+    st.divider()
+
+    # ============ 6. RECENT CHARGES ============
+    st.markdown(f"#### 📋 {T['storage_recent']}")
+
+    recent = storage[["report_date", "period_start_date", "period_end_date",
+                      "transaction_description", "amount"]].copy()
+    recent["period_start_date"] = pd.to_datetime(recent["period_start_date"], errors='coerce', utc=True).dt.tz_localize(None).dt.strftime("%Y-%m-%d")
+    recent["period_end_date"] = pd.to_datetime(recent["period_end_date"], errors='coerce', utc=True).dt.tz_localize(None).dt.strftime("%Y-%m-%d")
+    recent["report_date"] = recent["report_date"].dt.strftime("%Y-%m-%d")
+    recent["period"] = recent["period_start_date"] + " → " + recent["period_end_date"]
+    recent = recent[["report_date", "period", "transaction_description", "amount"]]
+    recent = recent.sort_values("report_date", ascending=False).head(20)
+    recent = recent.rename(columns={
+        "report_date": "Report Date",
+        "period": T["storage_period"],
+        "transaction_description": T["storage_type"],
+        "amount": T["storage_amount"],
+    })
+    st.dataframe(
+        recent, use_container_width=True, hide_index=True, height=400,
+        column_config={T["storage_amount"]: st.column_config.NumberColumn(format="$%.2f")},
+    )
 
 
 # ============================================================
@@ -2604,6 +2891,14 @@ def ai_executive_summary(data, lang):
             total_refunds = s[s["transaction_type"] == "Refund"]["amount"].sum()
             total_fees = s[s["transaction_type"].isin(["Service Fee", "Campaigns"])]["amount"].sum()
             margin = (net_paid / max(total_sales, 1)) * 100
+
+            # Storage breakdown
+            storage_mask = (s["transaction_type"] == "Service Fee") & \
+                           (s["transaction_description"].str.contains("Storage", case=False, na=False))
+            storage_total = abs(s[storage_mask]["amount"].sum())
+            lt_mask = storage_mask & s["transaction_description"].str.contains("LongTerm", case=False, na=False)
+            storage_lt = abs(s[lt_mask]["amount"].sum())
+
             stats["settlement"] = {
                 "net_paid_lifetime": float(net_paid),
                 "gross_sales": float(total_sales),
@@ -2611,6 +2906,10 @@ def ai_executive_summary(data, lang):
                 "total_fees_ads": float(abs(total_fees)),
                 "margin_pct": float(margin),
                 "periods_count": int(s["report_date"].nunique()) if "report_date" in s else 0,
+                "storage_total": float(storage_total),
+                "storage_longterm": float(storage_lt),
+                "storage_lt_pct": float((storage_lt / max(storage_total, 1)) * 100),
+                "storage_pct_of_sales": float((storage_total / max(total_sales, 1)) * 100),
             }
         except Exception as e:
             stats["settlement_error"] = str(e)
@@ -2949,15 +3248,21 @@ def render_overview(data, T, theme, lang):
     settle = data.get("settlement", pd.DataFrame())
     orders = data.get("orders", pd.DataFrame())
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
 
     # Settlement KPI
     if not settle.empty:
         payments = settle[settle["transaction_type"] == "PaymentSummary"]
         net_paid = payments["total_payable"].sum() if not payments.empty else 0
         sales_total = settle[settle["transaction_type"] == "Sale"]["amount"].sum()
+        # Storage
+        storage_mask = (settle["transaction_type"] == "Service Fee") & \
+                       (settle["transaction_description"].str.contains("Storage", case=False, na=False))
+        storage_total = abs(settle[storage_mask]["amount"].sum())
+
         c1.metric("💰 Net Paid (lifetime)", f"${float(net_paid):,.0f}")
         c2.metric("📈 Gross Sales", f"${float(sales_total):,.0f}")
+        c5.metric("💾 Storage", f"${float(storage_total):,.0f}")
 
     # Orders KPI
     if not orders.empty:
@@ -3118,6 +3423,7 @@ def main():
             # 💵 SALES & MONEY
             (T["cat_sales"], "orders",   T["orders_section"],       render_orders),
             (T["cat_sales"], "settle",   T["settlement_section"],   render_settlement),
+            (T["cat_sales"], "storage",  T["storage_section"],      render_storage),
 
             # 📦 OPERATIONS
             (T["cat_ops"],   "wfs",      T["wfs_section"],          render_wfs_shipments),
