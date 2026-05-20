@@ -1,15 +1,21 @@
 """
-Walmart Reports Dashboard v3.0
-ЗМІНИ vs v2.1:
-- 🆕 КАТЕГОРІЇ в sidebar (💵 Sales, 📦 Ops, 🚨 Problems, 📋 Catalog, ⚙️ System, 🤖 AI)
-- 🆕 3 РЕЖИМИ ПЕРЕГЛЯДУ:
-  • 🎯 Overview — топ KPI з кожного розділу одним екраном (за замовчуванням)
-  • 🔍 Focus — один розділ повністю (вибір з dropdown)
-  • 📚 All — всі розділи разом з категоріями та чекбоксами
-- Кожна категорія в expander — можна згорнути/розгорнути
+Walmart Reports Dashboard v3.1 — SMART BI
+ЗМІНИ vs v3.0:
+- 🆕 SMART сектори: кожен розділ тепер має 7-блочну структуру:
+  1. Executive Summary  (TL;DR з ключовими числами)
+  2. KPI Row            (5-8 cards)
+  3. Primary Chart      (тренд + Moving Average)
+  4. Breakdown          (по категоріях, drill-down)
+  5. Sub-charts         (pie / bar / waterfall)
+  6. Anomalies & Insights (автоматичні висновки)
+  7. Detail Table       (для drill-down)
+- 🆕 Money Flow Waterfall в Settlement
+- 🆕 ETA Scatter Timeline в WFS
+- 🆕 Reason × $ Lost heatmap в Returns
+- 🆕 Виправлено баг walmart.orders (text → timestamp cast)
 
-v2.1: ДОДАНО 📦 Orders/Sales
-v2.0: ДОДАНО WFS Shipments, Settlement, Customer Returns
+v3.0: КАТЕГОРІЇ в sidebar + 3 режими (Overview/Focus/All)
+v2.x: 3 нові розділи (WFS, Settlement, Returns) + Orders
 """
 
 import streamlit as st
@@ -622,7 +628,7 @@ def load_walmart_data():
         "wfs_shipments":   "SELECT * FROM walmart.wfs_shipments",
         "settlement":      "SELECT * FROM walmart.settlement",
         "returns":         "SELECT * FROM walmart.returns",
-        "orders":          "SELECT * FROM walmart.orders WHERE order_date >= CURRENT_DATE - INTERVAL '90 days'",
+        "orders":          "SELECT * FROM walmart.orders WHERE order_date::timestamp >= CURRENT_DATE - INTERVAL '180 days'",
     }
     try:
         with eng.connect() as conn:
@@ -687,212 +693,361 @@ def _pick_col(df, *candidates):
 
 
 def render_orders(data, T, theme):
+    """💎 SMART ORDERS — повноцінний BI розділ.
+    Структура:
+      1. Executive Summary
+      2. KPI Row (8 cards)
+      3. Daily Revenue Trend (з MA)
+      4. Top SKUs + Geo
+      5. Fulfillment & Status breakdown
+      6. Anomalies & Insights
+      7. Detail table
+    """
     orders = data.get("orders", pd.DataFrame())
     if orders.empty:
-        st.warning("⚠️ walmart.orders is empty")
+        st.warning("⚠️ walmart.orders is empty (check loader)")
         return
 
     st.markdown(f"### {T['orders_section']}")
     st.caption(T["orders_subtitle"])
 
-    # Знаходимо колонки (гнучко)
-    date_col   = _pick_col(orders, "order_date", "purchase_date", "created_at", "order_create_date")
-    amount_col = _pick_col(orders, "total_amount", "order_total", "amount", "total_price", "subtotal")
-    status_col = _pick_col(orders, "order_status", "status", "order_state")
-    sku_col    = _pick_col(orders, "sku", "seller_sku", "partner_sku", "item_sku")
-    qty_col    = _pick_col(orders, "quantity", "qty", "units", "order_quantity")
-    state_col  = _pick_col(orders, "ship_to_state", "state", "destination_state", "shipping_state")
-    order_id_col = _pick_col(orders, "order_id", "purchase_order_id", "customer_order_id", "po_id")
+    # ============ Підготовка даних ============
+    df = orders.copy()
+    # order_date — text → datetime
+    df["order_dt"] = pd.to_datetime(df["order_date"], errors='coerce')
+    df = df[df["order_dt"].notna()].copy()
+    df["line_total"] = pd.to_numeric(df["line_total"], errors='coerce').fillna(0)
+    df["tax_total"] = pd.to_numeric(df["tax_total"], errors='coerce').fillna(0)
+    df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0)
+    df["revenue"] = df["line_total"] + df["tax_total"]
+    df["date"] = df["order_dt"].dt.date
 
-    if date_col is None:
-        st.warning("⚠️ Could not find date column in walmart.orders")
-        st.dataframe(orders.head(20), use_container_width=True)
-        return
-
-    # Конвертуємо дату
-    orders_df = orders.copy()
-    orders_df[date_col] = pd.to_datetime(orders_df[date_col], errors='coerce')
-    orders_df = orders_df[orders_df[date_col].notna()]
-
-    if orders_df.empty:
-        st.warning("⚠️ No valid dates in orders")
-        return
-
-    # Останні 30 днів
     today = datetime.now().date()
-    cutoff = pd.Timestamp(today - timedelta(days=30))
-    last30 = orders_df[orders_df[date_col] >= cutoff]
+    last30 = df[df["order_dt"] >= pd.Timestamp(today - timedelta(days=30))]
+    last60 = df[df["order_dt"] >= pd.Timestamp(today - timedelta(days=60))]
+    prev30 = df[(df["order_dt"] >= pd.Timestamp(today - timedelta(days=60))) &
+                (df["order_dt"] < pd.Timestamp(today - timedelta(days=30)))]
 
-    # ===== KPI =====
-    total_orders = len(orders_df)
-    orders_30d = len(last30)
+    # ============ 1. EXECUTIVE SUMMARY ============
+    total_revenue = df["revenue"].sum()
+    total_orders = df["customer_order_id"].nunique()
+    revenue_30d = last30["revenue"].sum()
+    revenue_prev30 = prev30["revenue"].sum()
+    growth = ((revenue_30d - revenue_prev30) / max(revenue_prev30, 1)) * 100 if revenue_prev30 > 0 else 0
 
-    revenue_30d = 0
-    aov = 0
-    units_30d = 0
+    cancelled = df[df["line_status"].str.lower() == "cancelled"]
+    cancel_rate = (len(cancelled) / max(len(df), 1)) * 100
 
-    if amount_col and amount_col in last30:
-        revenue_30d = pd.to_numeric(last30[amount_col], errors='coerce').sum()
-        aov = revenue_30d / max(orders_30d, 1)
-    if qty_col and qty_col in last30:
-        units_30d = pd.to_numeric(last30[qty_col], errors='coerce').sum()
+    growth_emoji = "📈" if growth > 0 else "📉" if growth < 0 else "➡️"
+    growth_color = "#51cf66" if growth > 0 else "#e03131"
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric(T["orders_total"], f"{total_orders:,}")
-    c2.metric(T["orders_30d"], f"{orders_30d:,}")
-    c3.metric(T["orders_revenue"], f"${float(revenue_30d):,.0f}")
-    c4.metric(T["orders_aov"], f"${float(aov):,.2f}")
-    c5.metric(T["orders_units"], f"{int(units_30d):,}")
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(124,159,255,0.10), rgba(81,207,102,0.08));
+                border-left: 4px solid #7c9fff; padding: 14px 18px; border-radius: 8px;
+                margin: 8px 0 16px 0;">
+        <strong style="font-size:1.05rem;">📊 Executive Summary</strong><br>
+        <span style="opacity:0.9;">
+        За {len(df):,} line items продано <b>${total_revenue:,.0f}</b> (з податками).
+        Останні 30 днів: <b>${revenue_30d:,.0f}</b>
+        <span style="color:{growth_color}; font-weight:600;">{growth_emoji} {growth:+.1f}%</span>
+        проти попередніх 30 днів.
+        Cancel rate: <b>{cancel_rate:.1f}%</b>.
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # ===== Daily trend =====
-    st.markdown(f"#### 📈 {T['orders_daily_trend']}")
+    # ============ 2. KPI ROW (8 cards в 2 рядах) ============
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("📦 Total Line Items", f"{len(df):,}")
+    c2.metric("🛒 Unique Orders", f"{total_orders:,}")
+    c3.metric("💵 Total Revenue", f"${total_revenue:,.0f}")
+    c4.metric("📊 Avg Order Value", f"${(total_revenue / max(total_orders, 1)):,.2f}")
 
-    daily_agg = {date_col: orders_df.groupby(orders_df[date_col].dt.date).size().reset_index(name="orders_count")}
-    daily = daily_agg[date_col]
-    daily.columns = ["date", "orders"]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("📅 Last 30d Revenue", f"${revenue_30d:,.0f}", f"{growth:+.1f}%")
+    c2.metric("📦 Last 30d Orders", f"{last30['customer_order_id'].nunique():,}")
+    c3.metric("🚫 Cancel Rate", f"{cancel_rate:.1f}%")
+    c4.metric("🎯 Unique SKUs Sold", f"{df['sku'].nunique():,}")
 
-    if amount_col:
-        rev_daily = orders_df.groupby(orders_df[date_col].dt.date)[amount_col].apply(
-            lambda x: pd.to_numeric(x, errors='coerce').sum()
-        ).reset_index()
-        rev_daily.columns = ["date", "revenue"]
-        daily = daily.merge(rev_daily, on="date", how="left")
+    st.divider()
 
-    daily = daily.sort_values("date")
+    # ============ 3. DAILY REVENUE TREND ============
+    st.markdown("#### 📈 Daily Revenue & Orders Trend")
 
-    # Двохосний графік: bars=orders, line=revenue
+    daily = df.groupby("date").agg(
+        revenue=("revenue", "sum"),
+        orders=("customer_order_id", "nunique"),
+        units=("quantity", "sum"),
+    ).reset_index().sort_values("date")
+
+    # 7-day MA
+    daily["rev_ma7"] = daily["revenue"].rolling(7, min_periods=1).mean()
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=daily["date"], y=daily["orders"],
-        name="Orders", marker_color="#7c9fff", yaxis="y",
+        x=daily["date"], y=daily["revenue"],
+        name="Daily Revenue $", marker_color="#7c9fff", yaxis="y",
+        hovertemplate="<b>%{x}</b><br>Revenue: $%{y:,.2f}<extra></extra>",
     ))
-    if "revenue" in daily.columns:
-        fig.add_trace(go.Scatter(
-            x=daily["date"], y=daily["revenue"],
-            name="Revenue $", mode="lines+markers",
-            line=dict(color="#51cf66", width=3), yaxis="y2",
-        ))
+    fig.add_trace(go.Scatter(
+        x=daily["date"], y=daily["rev_ma7"],
+        name="7-day MA", mode="lines",
+        line=dict(color="#fab005", width=3, dash="dot"), yaxis="y",
+    ))
+    fig.add_trace(go.Scatter(
+        x=daily["date"], y=daily["orders"],
+        name="Orders count", mode="lines+markers",
+        line=dict(color="#51cf66", width=2), yaxis="y2",
+        marker=dict(size=4),
+    ))
     fig.update_layout(
-        height=400, template=theme["template"],
+        height=420, template=theme["template"],
         paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
         margin=dict(l=0, r=0, t=20, b=0),
-        yaxis=dict(title="Orders"),
-        yaxis2=dict(title="Revenue $", overlaying="y", side="right"),
-        legend=dict(orientation="h", y=1.1),
+        yaxis=dict(title="Revenue $", side="left"),
+        yaxis2=dict(title="Orders", overlaying="y", side="right", showgrid=False),
+        legend=dict(orientation="h", y=1.12),
+        hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # ===== By state + Top SKUs =====
+    # ============ 4. TOP SKUs + GEO ============
     c1, c2 = st.columns(2)
 
     with c1:
-        if state_col and state_col in last30:
-            st.markdown(f"#### 🗺️ {T['orders_by_state']}")
-            by_state = last30.groupby(state_col).agg(
-                orders=(date_col, "count"),
-            ).reset_index().sort_values("orders", ascending=False).head(15)
-            by_state = by_state[by_state[state_col].notna() & (by_state[state_col] != "")]
-            if not by_state.empty:
-                fig = px.bar(
-                    by_state.sort_values("orders"),
-                    x="orders", y=state_col, orientation="h",
-                    color="orders", color_continuous_scale="Blues",
-                )
-                fig.update_layout(
-                    height=450, template=theme["template"],
-                    paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
-                    showlegend=False, coloraxis_showscale=False,
-                    margin=dict(l=0, r=0, t=20, b=0),
-                    yaxis_title="",
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("State column not found in orders")
+        st.markdown("#### 🏆 Top 15 SKUs (Last 30d)")
+        top_sku = last30.groupby(["sku", "product_name"]).agg(
+            revenue=("revenue", "sum"),
+            units=("quantity", "sum"),
+            orders=("customer_order_id", "nunique"),
+        ).reset_index().sort_values("revenue", ascending=False).head(15)
+        top_sku["product_short"] = top_sku["product_name"].astype(str).str[:40]
+
+        fig = px.bar(
+            top_sku.sort_values("revenue"),
+            x="revenue", y="sku", orientation="h",
+            color="revenue", color_continuous_scale="Greens",
+            hover_data={"product_short": True, "units": True, "orders": True},
+            text="revenue",
+        )
+        fig.update_traces(texttemplate="$%{text:,.0f}", textposition="outside")
+        fig.update_layout(
+            height=500, template=theme["template"],
+            paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+            showlegend=False, coloraxis_showscale=False,
+            margin=dict(l=0, r=40, t=20, b=0), yaxis_title="",
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
     with c2:
-        if sku_col and amount_col and sku_col in last30 and amount_col in last30:
-            st.markdown(f"#### 🏆 {T['orders_top_skus']}")
-            top_sku = last30.copy()
-            top_sku[amount_col] = pd.to_numeric(top_sku[amount_col], errors='coerce')
-            top_sku_agg = top_sku.groupby(sku_col).agg(
-                revenue=(amount_col, "sum"),
-                orders=(date_col, "count"),
-            ).reset_index().sort_values("revenue", ascending=False).head(15)
+        st.markdown("#### 📍 Ship Node Distribution")
+        # WFS vs Seller-fulfilled
+        if "ship_node_type" in df.columns:
+            node_dist = df.groupby("ship_node_type").agg(
+                orders=("customer_order_id", "nunique"),
+                revenue=("revenue", "sum"),
+            ).reset_index().sort_values("revenue", ascending=False)
 
-            fig = px.bar(
-                top_sku_agg.sort_values("revenue"),
-                x="revenue", y=sku_col, orientation="h",
-                color="revenue", color_continuous_scale="Greens",
-                hover_data={"orders": True},
+            if not node_dist.empty:
+                colors_map = {
+                    "WFSFulfilled": "#7c9fff",
+                    "SellerFulfilled": "#fab005",
+                }
+                fig = px.pie(
+                    node_dist, values="revenue", names="ship_node_type",
+                    color="ship_node_type", color_discrete_map=colors_map,
+                    hole=0.5,
+                    title="Revenue Split by Fulfillment",
+                )
+                fig.update_traces(textposition='inside', textinfo='percent+label')
+                fig.update_layout(
+                    height=300, template=theme["template"],
+                    paper_bgcolor=theme["paper_bg"],
+                    margin=dict(l=0, r=0, t=40, b=0),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.dataframe(
+                    node_dist.rename(columns={
+                        "ship_node_type": "Type",
+                        "orders": "Orders",
+                        "revenue": "Revenue",
+                    }),
+                    use_container_width=True, hide_index=True,
+                    column_config={"Revenue": st.column_config.NumberColumn(format="$%.0f")},
+                )
+
+    st.divider()
+
+    # ============ 5. STATUS & FULFILLMENT ============
+    st.markdown("#### 📊 Status & Ship Method Breakdown")
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.markdown("**Line Status**")
+        status_dist = df["line_status"].fillna("UNKNOWN").value_counts().reset_index()
+        status_dist.columns = ["status", "count"]
+        colors_map = {
+            "Delivered": "#51cf66", "Shipped": "#7c9fff",
+            "Acknowledged": "#fab005", "Created": "#adb5bd",
+            "Cancelled": "#e03131", "UNKNOWN": "#868e96",
+        }
+        fig = px.pie(
+            status_dist.head(8), values="count", names="status",
+            color="status", color_discrete_map=colors_map, hole=0.4,
+        )
+        fig.update_layout(
+            height=320, template=theme["template"],
+            paper_bgcolor=theme["paper_bg"],
+            margin=dict(l=0, r=0, t=20, b=0),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        st.markdown("**Ship Method**")
+        if "ship_method" in df.columns:
+            sm_dist = df["ship_method"].fillna("UNKNOWN").value_counts().reset_index()
+            sm_dist.columns = ["method", "count"]
+            fig = px.pie(
+                sm_dist.head(8), values="count", names="method", hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set2,
             )
             fig.update_layout(
-                height=450, template=theme["template"],
-                paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
-                showlegend=False, coloraxis_showscale=False,
+                height=320, template=theme["template"],
+                paper_bgcolor=theme["paper_bg"],
                 margin=dict(l=0, r=0, t=20, b=0),
-                yaxis_title="",
             )
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("SKU/amount columns not found")
 
-    # ===== Status distribution =====
-    if status_col and status_col in orders_df:
-        st.markdown(f"#### 📊 {T['orders_status_dist']}")
-        status_dist = orders_df[status_col].fillna("UNKNOWN").value_counts().reset_index()
-        status_dist.columns = ["status", "count"]
-        status_dist = status_dist.head(8)
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            colors_map = {
-                "Acknowledged": "#7c9fff", "Shipped": "#51cf66",
-                "Delivered": "#40c057", "Cancelled": "#e03131",
-                "Created": "#fab005", "UNKNOWN": "#868e96",
-            }
+    with c3:
+        st.markdown("**Order Type**")
+        if "order_type" in df.columns:
+            ot_dist = df["order_type"].fillna("UNKNOWN").value_counts().reset_index()
+            ot_dist.columns = ["type", "count"]
             fig = px.pie(
-                status_dist, values="count", names="status",
-                color="status", color_discrete_map=colors_map, hole=0.4,
+                ot_dist.head(8), values="count", names="type", hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Pastel,
             )
-            fig.update_layout(height=300, template=theme["template"], paper_bgcolor=theme["paper_bg"])
+            fig.update_layout(
+                height=320, template=theme["template"],
+                paper_bgcolor=theme["paper_bg"],
+                margin=dict(l=0, r=0, t=20, b=0),
+            )
             st.plotly_chart(fig, use_container_width=True)
-        with c2:
-            st.dataframe(status_dist, use_container_width=True, hide_index=True, height=300)
 
-    # ===== Recent orders =====
-    st.markdown(f"#### 📋 {T['orders_recent']}")
+    st.divider()
 
-    display_cols = []
-    rename_map = {}
-    if order_id_col:
-        display_cols.append(order_id_col)
-        rename_map[order_id_col] = T["orders_order_id"]
-    if date_col:
-        display_cols.append(date_col)
-        rename_map[date_col] = T["orders_date_col"]
-    if status_col:
-        display_cols.append(status_col)
-        rename_map[status_col] = T["orders_status_col"]
-    if sku_col:
-        display_cols.append(sku_col)
-        rename_map[sku_col] = T["sku"]
-    if qty_col:
-        display_cols.append(qty_col)
-        rename_map[qty_col] = T["returns_qty"]
-    if amount_col:
-        display_cols.append(amount_col)
-        rename_map[amount_col] = T["orders_amount"]
-    if state_col:
-        display_cols.append(state_col)
-        rename_map[state_col] = T["orders_state"]
+    # ============ 6. ANOMALIES & INSIGHTS ============
+    st.markdown("#### 🚨 Anomalies & Insights")
 
-    if display_cols:
-        recent = orders_df.sort_values(date_col, ascending=False).head(30)[display_cols].copy()
-        recent[date_col] = pd.to_datetime(recent[date_col]).dt.strftime("%Y-%m-%d %H:%M")
-        recent = recent.rename(columns=rename_map)
-        st.dataframe(recent, use_container_width=True, hide_index=True, height=400,
-            column_config={
-                T["orders_amount"]: st.column_config.NumberColumn(format="$%.2f") if amount_col else None,
+    insights = []
+
+    # 1. Best day in last 30
+    if not last30.empty:
+        best_day = last30.groupby("date")["revenue"].sum().idxmax()
+        best_day_rev = last30.groupby("date")["revenue"].sum().max()
+        avg_day_rev = last30.groupby("date")["revenue"].sum().mean()
+        if best_day_rev > avg_day_rev * 2:
+            insights.append({
+                "type": "info",
+                "title": "📈 Outlier Day Detected",
+                "text": f"{best_day} мав revenue <b>${best_day_rev:,.0f}</b> (×{best_day_rev/avg_day_rev:.1f} від середнього ${avg_day_rev:,.0f})",
             })
+
+    # 2. Top SKU concentration
+    if not last30.empty:
+        sku_rev = last30.groupby("sku")["revenue"].sum().sort_values(ascending=False)
+        top5_share = sku_rev.head(5).sum() / sku_rev.sum() * 100 if sku_rev.sum() > 0 else 0
+        if top5_share > 40:
+            insights.append({
+                "type": "warn",
+                "title": "⚠️ High SKU Concentration",
+                "text": f"Топ-5 SKU генерують <b>{top5_share:.0f}%</b> виручки. Ризик якщо хтось з них unpublish/OOS.",
+            })
+
+    # 3. Cancellation spike
+    if not last30.empty and not prev30.empty:
+        c30 = (last30["line_status"].str.lower() == "cancelled").sum()
+        cp30 = (prev30["line_status"].str.lower() == "cancelled").sum()
+        if c30 > cp30 * 1.5 and c30 > 5:
+            insights.append({
+                "type": "crit",
+                "title": "🔴 Cancellation Spike",
+                "text": f"Cancellations зросли з {cp30} до <b>{c30}</b> (×{c30/max(cp30,1):.1f}). Перевір stock та проблемні SKU.",
+            })
+
+    # 4. WFS vs Seller share
+    if "ship_node_type" in last30.columns and not last30.empty:
+        wfs_share = (last30["ship_node_type"] == "WFSFulfilled").sum() / len(last30) * 100
+        if wfs_share > 80:
+            insights.append({
+                "type": "info",
+                "title": "🏭 WFS Dominance",
+                "text": f"<b>{wfs_share:.0f}%</b> замовлень через WFS. Логістично оптимально, але залежність від Walmart fees.",
+            })
+        elif wfs_share < 30:
+            insights.append({
+                "type": "warn",
+                "title": "📦 Low WFS Usage",
+                "text": f"Тільки <b>{wfs_share:.0f}%</b> через WFS. Розгляньте міграцію на WFS для швидкої доставки.",
+            })
+
+    # 5. Growth velocity
+    if abs(growth) > 30:
+        if growth > 0:
+            insights.append({
+                "type": "info",
+                "title": "🚀 Strong Growth",
+                "text": f"Revenue ↑ <b>+{growth:.0f}%</b> MoM. Швидкий зріст — перевір чи inventory витримує темп.",
+            })
+        else:
+            insights.append({
+                "type": "crit",
+                "title": "📉 Revenue Decline",
+                "text": f"Revenue ↓ <b>{growth:.0f}%</b> MoM. Терміново розібратись — конкуренти, BB, seasonal?",
+            })
+
+    if insights:
+        for ins in insights:
+            cls = {"crit": "severity-crit", "warn": "severity-warn", "info": "severity-info"}[ins["type"]]
+            st.markdown(f"""
+            <div class="{cls}">
+                <strong>{ins['title']}</strong><br>
+                <span style="opacity:0.9;">{ins['text']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.success("✅ No anomalies detected. Business operates within normal ranges.")
+
+    st.divider()
+
+    # ============ 7. RECENT ORDERS DETAIL ============
+    st.markdown("#### 📋 Recent Orders (last 30)")
+
+    recent = df.sort_values("order_dt", ascending=False).head(30)[[
+        "customer_order_id", "order_dt", "sku", "product_name",
+        "quantity", "line_total", "line_status", "ship_node_type", "carrier"
+    ]].copy()
+    recent["order_dt"] = recent["order_dt"].dt.strftime("%Y-%m-%d %H:%M")
+    recent["product_name"] = recent["product_name"].astype(str).str[:45]
+    recent = recent.rename(columns={
+        "customer_order_id": T["orders_order_id"],
+        "order_dt": T["orders_date_col"],
+        "sku": T["sku"],
+        "product_name": T["product"],
+        "quantity": T["returns_qty"],
+        "line_total": T["orders_amount"],
+        "line_status": T["orders_status_col"],
+        "ship_node_type": "Fulfillment",
+        "carrier": "Carrier",
+    })
+    st.dataframe(
+        recent, use_container_width=True, hide_index=True, height=420,
+        column_config={
+            T["orders_amount"]: st.column_config.NumberColumn(format="$%.2f"),
+        }
+    )
 
 
 # ============================================================
@@ -900,6 +1055,16 @@ def render_orders(data, T, theme):
 # ============================================================
 
 def render_wfs_shipments(data, T, theme):
+    """💎 SMART WFS — повноцінний BI для inbound shipments.
+    Структура:
+      1. Executive Summary
+      2. KPI Row
+      3. Active Shipments details
+      4. ETA Timeline
+      5. SKU Pipeline depth
+      6. FC + Carrier breakdown
+      7. Insights
+    """
     wfs = data.get("wfs_shipments", pd.DataFrame())
     if wfs.empty:
         st.warning("⚠️ walmart.wfs_shipments is empty")
@@ -908,95 +1073,256 @@ def render_wfs_shipments(data, T, theme):
     st.markdown(f"### {T['wfs_section']}")
     st.caption(T["wfs_subtitle"])
 
-    # ===== KPI =====
-    n_ships = wfs["shipment_id"].nunique()
-    awaiting = wfs[wfs["po_status"] == "AWAITING_DELIVERY"]["shipment_id"].nunique()
-    closed = wfs[wfs["po_status"] == "CLOSED"]["shipment_id"].nunique()
-    cancelled = wfs[wfs["po_status"] == "CANCELLED"]["shipment_id"].nunique()
+    # ============ Підготовка ============
+    wfs["expected_delivery_date"] = pd.to_datetime(wfs["expected_delivery_date"], errors='coerce')
+    wfs["po_create_date"] = pd.to_datetime(wfs["po_create_date"], errors='coerce')
+    wfs["expected_units"] = pd.to_numeric(wfs["expected_units"], errors='coerce').fillna(0)
+    wfs["received_units"] = pd.to_numeric(wfs["received_units"], errors='coerce').fillna(0)
 
     awaiting_df = wfs[wfs["po_status"] == "AWAITING_DELIVERY"]
-    pending_units = int((awaiting_df["expected_units"].fillna(0) - awaiting_df["received_units"].fillna(0)).sum()) if not awaiting_df.empty else 0
+    closed_df = wfs[wfs["po_status"] == "CLOSED"]
 
+    n_ships = wfs["shipment_id"].nunique()
+    n_awaiting = awaiting_df["shipment_id"].nunique()
+    n_closed = closed_df["shipment_id"].nunique()
+    n_cancelled = wfs[wfs["po_status"] == "CANCELLED"]["shipment_id"].nunique()
+
+    pending_units = int((awaiting_df["expected_units"] - awaiting_df["received_units"]).sum())
+    total_pending_skus = awaiting_df["sku"].nunique()
+
+    # Naerest ETA
+    next_eta = awaiting_df[awaiting_df["expected_delivery_date"].notna()]["expected_delivery_date"].min()
+    days_to_next = (next_eta.date() - datetime.now().date()).days if pd.notna(next_eta) else None
+
+    # ============ 1. EXECUTIVE SUMMARY ============
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(124,159,255,0.10), rgba(81,207,102,0.08));
+                border-left: 4px solid #7c9fff; padding: 14px 18px; border-radius: 8px;
+                margin: 8px 0 16px 0;">
+        <strong style="font-size:1.05rem;">🚛 Logistics Pipeline</strong><br>
+        <span style="opacity:0.9;">
+        <b>{n_awaiting}</b> активних поставок з <b>{pending_units:,}</b> units по <b>{total_pending_skus}</b> SKU в дорозі.
+        {f"Найближча ETA: <b>{next_eta.strftime('%Y-%m-%d')}</b> (через {days_to_next} днів)." if days_to_next is not None else ""}<br>
+        Завершено: <b>{n_closed}</b> · Скасовано: <b>{n_cancelled}</b> з <b>{n_ships}</b> загалом.
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ============ 2. KPI ============
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric(T["wfs_total_ships"], f"{n_ships}")
-    c2.metric(T["wfs_in_transit"], f"{awaiting}")
+    c2.metric(T["wfs_in_transit"], f"{n_awaiting}")
     c3.metric(T["wfs_pending_units"], f"{pending_units:,}")
-    c4.metric(T["wfs_closed"], f"{closed}")
-    c5.metric(T["wfs_cancelled"], f"{cancelled}")
+    c4.metric(T["wfs_closed"], f"{n_closed}")
+    c5.metric(T["wfs_cancelled"], f"{n_cancelled}")
 
-    # ===== Active shipments table =====
+    st.divider()
+
+    # ============ 3. ACTIVE SHIPMENTS DETAIL ============
     st.markdown(f"#### 🚛 {T['wfs_active_title']}")
 
     if not awaiting_df.empty:
         agg = awaiting_df.groupby("shipment_id").agg(
             fc=("fc_name", "first"),
             carrier=("carrier_name", "first"),
+            tracking=("tracking_no", "first"),
+            created=("po_create_date", "min"),
             eta=("expected_delivery_date", "max"),
             skus=("sku", "nunique"),
             expected=("expected_units", "sum"),
             received=("received_units", "sum"),
         ).reset_index()
-        agg["pending"] = (agg["expected"].fillna(0) - agg["received"].fillna(0)).astype(int)
+        agg["pending"] = (agg["expected"] - agg["received"]).astype(int)
+        agg["days_to_eta"] = ((agg["eta"] - pd.Timestamp(datetime.now().date())).dt.days).astype("Int64")
         agg["eta"] = pd.to_datetime(agg["eta"]).dt.strftime("%Y-%m-%d")
+        agg["created"] = pd.to_datetime(agg["created"]).dt.strftime("%Y-%m-%d")
+
+        # Sort by ETA
+        agg = agg.sort_values("eta", na_position="last")
+
         agg = agg.rename(columns={
             "shipment_id": "Shipment",
             "fc": T["wfs_fc"],
             "carrier": T["wfs_carrier"],
+            "tracking": "Tracking",
+            "created": "Created",
             "eta": T["wfs_eta"],
+            "days_to_eta": "Days",
             "skus": T["wfs_skus"],
             "expected": "Expected",
             "received": T["wfs_received"],
             "pending": T["wfs_pending"],
         })
-        st.dataframe(agg, use_container_width=True, hide_index=True,
+        st.dataframe(
+            agg, use_container_width=True, hide_index=True, height=300,
             column_config={
                 "Expected": st.column_config.NumberColumn(format="%d"),
                 T["wfs_received"]: st.column_config.NumberColumn(format="%d"),
                 T["wfs_pending"]: st.column_config.NumberColumn(format="%d"),
-            })
+                "Days": st.column_config.NumberColumn(format="%d days"),
+            },
+        )
     else:
         st.info("No active shipments")
 
-    # ===== Top SKUs pending =====
+    # ============ 4. ETA TIMELINE ============
+    if not awaiting_df.empty:
+        st.markdown("#### 📅 Upcoming Deliveries Timeline")
+
+        eta_data = awaiting_df.groupby("shipment_id").agg(
+            eta=("expected_delivery_date", "max"),
+            fc=("fc_name", "first"),
+            units=("expected_units", lambda x: x.sum() - awaiting_df.loc[x.index, "received_units"].sum()),
+            skus=("sku", "nunique"),
+        ).reset_index()
+        eta_data = eta_data[eta_data["eta"].notna()].sort_values("eta")
+
+        if not eta_data.empty:
+            fig = px.scatter(
+                eta_data,
+                x="eta", y="units", size="units", color="fc",
+                hover_data={"shipment_id": True, "skus": True},
+                size_max=60,
+            )
+            fig.update_layout(
+                height=350, template=theme["template"],
+                paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+                margin=dict(l=0, r=0, t=20, b=0),
+                xaxis_title="Expected Delivery", yaxis_title="Units Pending",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ============ 5. SKU PIPELINE ============
     if not awaiting_df.empty:
         st.markdown(f"#### 🎯 {T['wfs_top_skus_pending']}")
-        sku_pend = awaiting_df.groupby(["sku", "description"]).agg(
-            pending=("expected_units", lambda x: x.sum() - awaiting_df.loc[x.index, "received_units"].fillna(0).sum()),
+        sku_pend = awaiting_df.copy()
+        sku_pend["pending"] = sku_pend["expected_units"] - sku_pend["received_units"]
+        sku_pend_agg = sku_pend.groupby(["sku", "description"]).agg(
+            pending=("pending", "sum"),
             ships=("shipment_id", "nunique"),
-        ).reset_index().sort_values("pending", ascending=False).head(15)
-        sku_pend["description"] = sku_pend["description"].astype(str).str[:50]
+        ).reset_index().sort_values("pending", ascending=False).head(20)
+        sku_pend_agg["description"] = sku_pend_agg["description"].astype(str).str[:50]
 
         fig = px.bar(
-            sku_pend.sort_values("pending"),
+            sku_pend_agg.sort_values("pending"),
             x="pending", y="sku", orientation="h",
             color="pending", color_continuous_scale="Blues",
             hover_data={"description": True, "ships": True},
+            text="pending",
         )
+        fig.update_traces(textposition="outside")
         fig.update_layout(
-            height=500, template=theme["template"],
+            height=600, template=theme["template"],
             paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
             showlegend=False, coloraxis_showscale=False,
-            margin=dict(l=0, r=0, t=20, b=0),
+            margin=dict(l=0, r=40, t=20, b=0), yaxis_title="",
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # ===== By FC and Carrier =====
+    st.divider()
+
+    # ============ 6. FC + CARRIER ============
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(f"#### 🏭 {T['wfs_by_fc']}")
-        fc_dist = wfs.groupby("fc_name")["shipment_id"].nunique().reset_index().sort_values("shipment_id", ascending=False)
+        fc_dist = wfs.groupby("fc_name").agg(
+            ships=("shipment_id", "nunique"),
+            units=("expected_units", "sum"),
+        ).reset_index().sort_values("units", ascending=False)
+        fc_dist = fc_dist[fc_dist["fc_name"].notna() & (fc_dist["fc_name"] != "")]
         if not fc_dist.empty:
-            fig = px.pie(fc_dist, values="shipment_id", names="fc_name", hole=0.4)
-            fig.update_layout(height=350, template=theme["template"], paper_bgcolor=theme["paper_bg"])
+            fig = px.pie(
+                fc_dist, values="units", names="fc_name", hole=0.5,
+                title="Units by FC",
+            )
+            fig.update_traces(textposition="inside", textinfo="percent+label")
+            fig.update_layout(
+                height=350, template=theme["template"], paper_bgcolor=theme["paper_bg"],
+                margin=dict(l=0, r=0, t=40, b=0),
+            )
             st.plotly_chart(fig, use_container_width=True)
 
     with c2:
         st.markdown(f"#### 🚚 {T['wfs_by_carrier']}")
-        carr_dist = wfs[wfs["carrier_name"].notna() & (wfs["carrier_name"] != "")].groupby("carrier_name")["shipment_id"].nunique().reset_index().sort_values("shipment_id", ascending=False)
+        carr_dist = wfs[wfs["carrier_name"].notna() & (wfs["carrier_name"] != "")].groupby("carrier_name").agg(
+            ships=("shipment_id", "nunique"),
+        ).reset_index().sort_values("ships", ascending=False)
         if not carr_dist.empty:
-            fig = px.pie(carr_dist, values="shipment_id", names="carrier_name", hole=0.4)
-            fig.update_layout(height=350, template=theme["template"], paper_bgcolor=theme["paper_bg"])
+            fig = px.pie(
+                carr_dist, values="ships", names="carrier_name", hole=0.5,
+                title="Shipments by Carrier",
+            )
+            fig.update_traces(textposition="inside", textinfo="percent+label")
+            fig.update_layout(
+                height=350, template=theme["template"], paper_bgcolor=theme["paper_bg"],
+                margin=dict(l=0, r=0, t=40, b=0),
+            )
             st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ============ 7. INSIGHTS ============
+    st.markdown("#### 🚨 Logistics Insights")
+
+    insights = []
+
+    # Large incoming shipment alert
+    if pending_units > 10000:
+        insights.append({
+            "type": "info",
+            "title": "📦 Major Restock Incoming",
+            "text": f"<b>{pending_units:,}</b> units в дорозі по <b>{total_pending_skus}</b> SKU. "
+                    f"Підготуй PPC бюджет та monitoring після прибуття.",
+        })
+
+    # Imminent deliveries
+    if days_to_next is not None and days_to_next <= 7:
+        nearest_ship = awaiting_df[awaiting_df["expected_delivery_date"] == next_eta]
+        nearest_units = int((nearest_ship["expected_units"] - nearest_ship["received_units"]).sum())
+        insights.append({
+            "type": "warn",
+            "title": "⏰ Imminent Delivery",
+            "text": f"Через <b>{days_to_next} днів</b> прибуде <b>{nearest_units:,}</b> units. "
+                    f"Готуй receiving capacity на складі.",
+        })
+
+    # Cancellation rate
+    if n_ships > 5:
+        cancel_rate = (n_cancelled / n_ships) * 100
+        if cancel_rate > 10:
+            insights.append({
+                "type": "warn",
+                "title": "🚫 High Cancellation Rate",
+                "text": f"<b>{cancel_rate:.0f}%</b> shipments скасовано. Перевір процес inbound планування.",
+            })
+
+    # FC concentration
+    if not awaiting_df.empty:
+        fc_pending = awaiting_df.groupby("fc_name")["sku"].nunique()
+        if len(fc_pending) > 0:
+            top_fc = fc_pending.idxmax()
+            top_fc_pct = (fc_pending.max() / fc_pending.sum()) * 100
+            if top_fc_pct > 70:
+                insights.append({
+                    "type": "info",
+                    "title": "🏭 FC Concentration",
+                    "text": f"<b>{top_fc_pct:.0f}%</b> SKU йдуть на <b>{top_fc}</b>. "
+                            f"Розглянь географічну диверсифікацію складів.",
+                })
+
+    if insights:
+        for ins in insights:
+            cls = {"crit": "severity-crit", "warn": "severity-warn", "info": "severity-info"}[ins["type"]]
+            st.markdown(f"""
+            <div class="{cls}">
+                <strong>{ins['title']}</strong><br>
+                <span style="opacity:0.9;">{ins['text']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.success("✅ Logistics pipeline operating smoothly.")
 
 
 # ============================================================
@@ -1004,105 +1330,334 @@ def render_wfs_shipments(data, T, theme):
 # ============================================================
 
 def render_settlement(data, T, theme):
+    """💎 SMART SETTLEMENT — повноцінний фінансовий BI.
+    Структура:
+      1. Executive Summary (2-річний overview)
+      2. KPI Row
+      3. Monthly P&L timeline
+      4. Money Flow waterfall (Sales→Refunds→Fees→Net)
+      5. Top SKUs Revenue
+      6. Anomalies & Insights
+      7. Recent Payouts
+    """
     settle = data.get("settlement", pd.DataFrame())
     if settle.empty:
-        st.warning("⚠️ walmart.settlement is empty")
+        st.warning("⚠️ walmart.settlement is empty (run walmart_settlement_loader)")
         return
 
     st.markdown(f"### {T['settlement_section']}")
     st.caption(T["settlement_subtitle"])
 
-    # ===== KPI =====
-    n_periods = settle["report_date"].nunique() if "report_date" in settle else 0
+    # ============ Підготовка ============
+    settle["report_date"] = pd.to_datetime(settle["report_date"], errors='coerce')
+    settle["amount"] = pd.to_numeric(settle["amount"], errors='coerce').fillna(0)
+    settle["total_payable"] = pd.to_numeric(settle["total_payable"], errors='coerce').fillna(0)
 
     payments = settle[settle["transaction_type"] == "PaymentSummary"]
-    net_paid = payments["total_payable"].sum() if not payments.empty else 0
+    sales_df = settle[settle["transaction_type"] == "Sale"]
+    refunds_df = settle[settle["transaction_type"] == "Refund"]
+    adj_df = settle[settle["transaction_type"] == "Adjustment"]
+    fees_df = settle[settle["transaction_type"].isin(["Service Fee", "Campaigns"])]
 
-    sales = settle[settle["transaction_type"] == "Sale"]["amount"].sum()
-    fees = settle[settle["transaction_type"].isin(["Service Fee", "Campaigns"])]["amount"].sum()
-    refunds = settle[settle["transaction_type"] == "Refund"]["amount"].sum()
+    net_paid = payments["total_payable"].sum()
+    total_sales = sales_df["amount"].sum()
+    total_refunds = refunds_df["amount"].sum()
+    total_adj = adj_df["amount"].sum()
+    total_fees = fees_df["amount"].sum()
+    margin_pct = (net_paid / max(total_sales, 1)) * 100 if total_sales > 0 else 0
 
+    # ============ 1. EXECUTIVE SUMMARY ============
+    n_periods = settle["report_date"].nunique()
+    date_min = settle["report_date"].min()
+    date_max = settle["report_date"].max()
+    years_span = (date_max - date_min).days / 365 if pd.notna(date_min) else 0
+
+    # Last month
+    last_month_payments = payments[payments["report_date"] >= pd.Timestamp(datetime.now().date() - timedelta(days=30))]
+    last_month_paid = last_month_payments["total_payable"].sum()
+
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(81,207,102,0.10), rgba(124,159,255,0.08));
+                border-left: 4px solid #51cf66; padding: 14px 18px; border-radius: 8px;
+                margin: 8px 0 16px 0;">
+        <strong style="font-size:1.05rem;">💰 Financial Summary ({years_span:.1f} years)</strong><br>
+        <span style="opacity:0.9;">
+        За <b>{n_periods}</b> settlement періодів виплачено <b>${net_paid:,.0f}</b>
+        (margin: <b>{margin_pct:.0f}%</b> з gross sales <b>${total_sales:,.0f}</b>).<br>
+        Refunds: <b>${abs(total_refunds):,.0f}</b> &nbsp;·&nbsp;
+        Adjustments: <b>${abs(total_adj):,.0f}</b> &nbsp;·&nbsp;
+        Fees+Ads: <b>${abs(total_fees):,.0f}</b><br>
+        Останні 30 днів виплачено: <b>${last_month_paid:,.0f}</b>
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ============ 2. KPI ============
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric(T["settlement_periods"], f"{n_periods}")
-    c2.metric(T["settlement_net_paid"], f"${float(net_paid):,.2f}")
-    c3.metric(T["settlement_sales"], f"${float(sales):,.0f}")
-    c4.metric(T["settlement_fees"], f"${float(fees):,.0f}")
-    c5.metric(T["settlement_refunds_total"], f"${float(refunds):,.0f}")
+    c1.metric("📅 Periods", f"{n_periods}")
+    c2.metric("💰 Net Paid", f"${net_paid:,.0f}")
+    c3.metric("📈 Gross Sales", f"${total_sales:,.0f}")
+    c4.metric("📉 Total Costs", f"${abs(total_refunds + total_adj + total_fees):,.0f}")
+    c5.metric("🎯 Margin", f"{margin_pct:.0f}%")
 
-    # ===== Payouts timeline =====
-    st.markdown(f"#### 📈 {T['payouts_chart_title']}")
-    if not payments.empty:
-        ptime = payments[["report_date", "total_payable", "transaction_description"]].copy()
-        ptime["report_date"] = pd.to_datetime(ptime["report_date"])
-        ptime = ptime.sort_values("report_date")
+    st.divider()
 
-        # Колір залежно від знака
-        ptime["color"] = ptime["total_payable"].apply(lambda x: "Deposit" if x > 0 else "Debit")
+    # ============ 3. MONTHLY P&L TIMELINE ============
+    st.markdown("#### 📈 Monthly P&L Timeline")
 
-        fig = px.bar(
-            ptime, x="report_date", y="total_payable",
-            color="color",
-            color_discrete_map={"Deposit": "#51cf66", "Debit": "#e03131"},
-            hover_data={"transaction_description": True},
-        )
-        fig.update_layout(
-            height=400, template=theme["template"],
-            paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
-            margin=dict(l=0, r=0, t=20, b=0),
-            xaxis_title="", yaxis_title="USD",
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    settle["month"] = settle["report_date"].dt.to_period("M").dt.to_timestamp()
 
-    # ===== Transaction types breakdown =====
+    monthly = settle.groupby(["month", "transaction_type"])["amount"].sum().reset_index()
+    monthly_pivot = monthly.pivot_table(
+        index="month", columns="transaction_type", values="amount", aggfunc="sum"
+    ).fillna(0).reset_index()
+
+    # Сума net по місяцях з payments
+    payments["month"] = payments["report_date"].dt.to_period("M").dt.to_timestamp()
+    net_monthly = payments.groupby("month")["total_payable"].sum().reset_index()
+
+    fig = go.Figure()
+
+    if "Sale" in monthly_pivot.columns:
+        fig.add_trace(go.Bar(
+            x=monthly_pivot["month"], y=monthly_pivot["Sale"],
+            name="💵 Sales", marker_color="#51cf66",
+        ))
+    if "Refund" in monthly_pivot.columns:
+        fig.add_trace(go.Bar(
+            x=monthly_pivot["month"], y=monthly_pivot["Refund"],
+            name="🔄 Refunds", marker_color="#e03131",
+        ))
+    if "Service Fee" in monthly_pivot.columns:
+        fig.add_trace(go.Bar(
+            x=monthly_pivot["month"], y=monthly_pivot["Service Fee"],
+            name="💸 Fees", marker_color="#fab005",
+        ))
+    if "Campaigns" in monthly_pivot.columns:
+        fig.add_trace(go.Bar(
+            x=monthly_pivot["month"], y=monthly_pivot["Campaigns"],
+            name="📣 Ads", marker_color="#9775fa",
+        ))
+    if "Adjustment" in monthly_pivot.columns:
+        fig.add_trace(go.Bar(
+            x=monthly_pivot["month"], y=monthly_pivot["Adjustment"],
+            name="⚖️ Adjustments", marker_color="#868e96",
+        ))
+
+    # Net line поверх
+    if not net_monthly.empty:
+        fig.add_trace(go.Scatter(
+            x=net_monthly["month"], y=net_monthly["total_payable"],
+            name="💰 Net Paid", mode="lines+markers",
+            line=dict(color="#7c9fff", width=4),
+            marker=dict(size=10, symbol="diamond"),
+        ))
+
+    fig.update_layout(
+        height=450, template=theme["template"],
+        paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+        barmode="relative",
+        margin=dict(l=0, r=0, t=20, b=0),
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.12),
+        yaxis_title="USD",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ============ 4. MONEY FLOW WATERFALL ============
+    st.markdown("#### 💱 Money Flow — How $1 of Sales Becomes Payout")
+
+    flow_data = [
+        ("💵 Gross Sales", total_sales, "#51cf66"),
+        ("🔄 - Refunds", -abs(total_refunds), "#e03131"),
+        ("⚖️ - Adjustments", -abs(total_adj), "#868e96"),
+        ("💸 - Service Fees", -abs(fees_df[fees_df["transaction_type"] == "Service Fee"]["amount"].sum()), "#fab005"),
+        ("📣 - Ads (Campaigns)", -abs(fees_df[fees_df["transaction_type"] == "Campaigns"]["amount"].sum()), "#9775fa"),
+        ("💰 Net to PAYONEER", net_paid, "#7c9fff"),
+    ]
+
+    fig = go.Figure(go.Waterfall(
+        name="Flow",
+        orientation="v",
+        measure=["absolute", "relative", "relative", "relative", "relative", "total"],
+        x=[d[0] for d in flow_data],
+        y=[d[1] for d in flow_data],
+        text=[f"${abs(d[1]):,.0f}" for d in flow_data],
+        textposition="outside",
+        connector={"line": {"color": "rgb(63, 63, 63)"}},
+        increasing={"marker": {"color": "#51cf66"}},
+        decreasing={"marker": {"color": "#e03131"}},
+        totals={"marker": {"color": "#7c9fff"}},
+    ))
+    fig.update_layout(
+        height=450, template=theme["template"],
+        paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+        margin=dict(l=0, r=0, t=20, b=0),
+        showlegend=False,
+        yaxis_title="USD",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ============ 5. TOP SKUs by Revenue ============
     c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(f"#### 💱 {T['settlement_by_type']}")
-        by_type = settle.groupby("transaction_type").agg(
-            cnt=("amount", "count"),
-            amt=("amount", "sum")
-        ).reset_index().sort_values("amt", ascending=False)
-        if not by_type.empty:
-            by_type = by_type.rename(columns={
-                "transaction_type": T["txn_type"],
-                "cnt": T["txn_count"],
-                "amt": T["txn_amount"],
-            })
-            st.dataframe(by_type, use_container_width=True, hide_index=True, height=350,
-                column_config={
-                    T["txn_amount"]: st.column_config.NumberColumn(format="$%.2f"),
-                })
 
-    with c2:
-        st.markdown(f"#### 🏆 {T['top_sku_revenue']}")
-        sku_rev = settle[(settle["transaction_type"] == "Sale") & (settle["partner_item_id"].notna()) & (settle["partner_item_id"] != "")]
+    with c1:
+        st.markdown("#### 🏆 Top 15 SKUs (2-year lifetime)")
+        sku_rev = sales_df[(sales_df["partner_item_id"].notna()) & (sales_df["partner_item_id"] != "")]
         if not sku_rev.empty:
             top_sku = sku_rev.groupby(["partner_item_id", "partner_item_name"]).agg(
                 rev=("amount", "sum"),
+                qty=("ship_qty", "sum"),
                 cnt=("amount", "count"),
-            ).reset_index().sort_values("rev", ascending=False).head(10)
+            ).reset_index().sort_values("rev", ascending=False).head(15)
             top_sku["partner_item_name"] = top_sku["partner_item_name"].astype(str).str[:35]
-            top_sku = top_sku.rename(columns={
-                "partner_item_id": T["sku"],
-                "partner_item_name": T["product"],
-                "rev": "Revenue",
-                "cnt": "Sales",
+
+            fig = px.bar(
+                top_sku.sort_values("rev"),
+                x="rev", y="partner_item_id", orientation="h",
+                color="rev", color_continuous_scale="Greens",
+                hover_data={"partner_item_name": True, "cnt": True},
+                text="rev",
+            )
+            fig.update_traces(texttemplate="$%{text:,.0f}", textposition="outside")
+            fig.update_layout(
+                height=500, template=theme["template"],
+                paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+                showlegend=False, coloraxis_showscale=False,
+                margin=dict(l=0, r=40, t=20, b=0),
+                yaxis_title="",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        st.markdown("#### 🥧 Transaction Types Breakdown")
+        by_type = settle.groupby("transaction_type").agg(
+            cnt=("amount", "count"),
+            amt=("amount", "sum"),
+        ).reset_index()
+        by_type["abs_amt"] = by_type["amt"].abs()
+        by_type = by_type.sort_values("abs_amt", ascending=False)
+
+        fig = px.pie(
+            by_type, values="abs_amt", names="transaction_type",
+            hole=0.5,
+            color_discrete_sequence=px.colors.qualitative.Set2,
+        )
+        fig.update_traces(textposition='inside', textinfo='percent+label')
+        fig.update_layout(
+            height=500, template=theme["template"],
+            paper_bgcolor=theme["paper_bg"],
+            margin=dict(l=0, r=0, t=20, b=0),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ============ 6. ANOMALIES & INSIGHTS ============
+    st.markdown("#### 🚨 Financial Insights")
+
+    insights = []
+
+    # Margin check
+    if margin_pct < 30:
+        insights.append({
+            "type": "crit",
+            "title": "📉 Low Margin",
+            "text": f"Margin <b>{margin_pct:.0f}%</b> нижче 30%. Перевір fees, ads, refunds.",
+        })
+    elif margin_pct > 50:
+        insights.append({
+            "type": "info",
+            "title": "🎯 Healthy Margin",
+            "text": f"Margin <b>{margin_pct:.0f}%</b> вище 50% — це топ для marketplace.",
+        })
+
+    # Refund rate
+    refund_rate = (abs(total_refunds) / max(total_sales, 1)) * 100
+    if refund_rate > 7:
+        insights.append({
+            "type": "warn",
+            "title": "🔄 High Refund Rate",
+            "text": f"Refunds = <b>{refund_rate:.1f}%</b> sales (норма 3-5%). Перевір returns dashboard.",
+        })
+
+    # Best month
+    if not net_monthly.empty and len(net_monthly) > 1:
+        best_month_idx = net_monthly["total_payable"].idxmax()
+        best_month_val = net_monthly.loc[best_month_idx, "total_payable"]
+        best_month_dt = net_monthly.loc[best_month_idx, "month"]
+        avg_month = net_monthly["total_payable"].mean()
+        if best_month_val > avg_month * 2:
+            insights.append({
+                "type": "info",
+                "title": "🏆 Outlier Month",
+                "text": f"<b>{best_month_dt.strftime('%B %Y')}</b> = ${best_month_val:,.0f} (×{best_month_val/avg_month:.1f} від avg ${avg_month:,.0f})",
             })
-            st.dataframe(top_sku, use_container_width=True, hide_index=True, height=350,
-                column_config={
-                    "Revenue": st.column_config.NumberColumn(format="$%.2f"),
+
+    # Ads spend
+    ads_total = abs(fees_df[fees_df["transaction_type"] == "Campaigns"]["amount"].sum())
+    if ads_total > 0:
+        ads_pct = (ads_total / max(total_sales, 1)) * 100
+        if ads_pct > 10:
+            insights.append({
+                "type": "warn",
+                "title": "📣 High Ad Spend",
+                "text": f"Ads <b>{ads_pct:.1f}%</b> від sales (${ads_total:,.0f}). Перевір ROAS на топ SKU.",
+            })
+
+    # Growth trend
+    if not net_monthly.empty and len(net_monthly) >= 6:
+        net_monthly_sorted = net_monthly.sort_values("month")
+        last3 = net_monthly_sorted.tail(3)["total_payable"].sum()
+        prev3 = net_monthly_sorted.tail(6).head(3)["total_payable"].sum()
+        if prev3 > 0:
+            growth_q = ((last3 - prev3) / prev3) * 100
+            if growth_q > 50:
+                insights.append({
+                    "type": "info",
+                    "title": "🚀 Accelerating Growth",
+                    "text": f"Останні 3 місяці vs попередні 3 = <b>+{growth_q:.0f}%</b>. Масштабуйся!",
+                })
+            elif growth_q < -20:
+                insights.append({
+                    "type": "crit",
+                    "title": "📉 Declining Trend",
+                    "text": f"Останні 3 місяці vs попередні 3 = <b>{growth_q:.0f}%</b>. Терміново розібратись.",
                 })
 
-    # ===== Recent payments =====
-    st.markdown(f"#### 💰 {T['settlement_recent']}")
+    if insights:
+        for ins in insights:
+            cls = {"crit": "severity-crit", "warn": "severity-warn", "info": "severity-info"}[ins["type"]]
+            st.markdown(f"""
+            <div class="{cls}">
+                <strong>{ins['title']}</strong><br>
+                <span style="opacity:0.9;">{ins['text']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.success("✅ Financial metrics look healthy.")
+
+    st.divider()
+
+    # ============ 7. RECENT PAYOUTS ============
+    st.markdown("#### 💰 Recent PAYONEER Deposits")
     if not payments.empty:
-        recent_pay = payments[["report_date", "total_payable", "transaction_description"]].sort_values("report_date", ascending=False).head(10).copy()
+        recent_pay = payments[["report_date", "total_payable", "transaction_description"]].copy()
+        recent_pay = recent_pay.sort_values("report_date", ascending=False).head(15)
+        recent_pay["report_date"] = recent_pay["report_date"].dt.strftime("%Y-%m-%d")
         recent_pay = recent_pay.rename(columns={
             "report_date": T["period"],
             "total_payable": T["deposit"],
             "transaction_description": T["channel"],
         })
-        st.dataframe(recent_pay, use_container_width=True, hide_index=True,
-            column_config={T["deposit"]: st.column_config.NumberColumn(format="$%.2f")})
+        st.dataframe(
+            recent_pay, use_container_width=True, hide_index=True, height=400,
+            column_config={T["deposit"]: st.column_config.NumberColumn(format="$%.2f")},
+        )
 
 
 # ============================================================
@@ -1110,136 +1665,332 @@ def render_settlement(data, T, theme):
 # ============================================================
 
 def render_returns(data, T, theme):
+    """💎 SMART RETURNS — повноцінний BI для повернень.
+    Структура:
+      1. Executive Summary
+      2. KPI Row
+      3. Returns Timeline (daily)
+      4. Reasons heatmap + Status pie
+      5. Killer SKUs table
+      6. Anomalies & Insights
+      7. Customer detail
+    """
     ret = data.get("returns", pd.DataFrame())
     if ret.empty:
-        st.warning("⚠️ walmart.returns is empty")
+        st.warning("⚠️ walmart.returns is empty (run walmart_returns_loader)")
         return
 
     st.markdown(f"### {T['returns_section']}")
     st.caption(T["returns_subtitle"])
 
-    # ===== KPI =====
-    n_returns = ret["return_order_id"].nunique() if "return_order_id" in ret else 0
-    n_skus = ret["sku"].nunique() if "sku" in ret else 0
-    total_refund = ret["total_refund_amount"].sum() if "total_refund_amount" in ret else 0
+    # ============ Підготовка ============
+    ret["return_order_date"] = pd.to_datetime(ret["return_order_date"], errors='coerce')
+    ret["unit_price"] = pd.to_numeric(ret["unit_price"], errors='coerce').fillna(0)
+    ret["quantity"] = pd.to_numeric(ret["quantity"], errors='coerce').fillna(1)
+    ret["total_refund_amount"] = pd.to_numeric(ret["total_refund_amount"], errors='coerce').fillna(0)
+    ret["lost"] = ret["unit_price"] * ret["quantity"]
+    ret = ret[ret["return_order_date"].notna()].copy()
 
-    # Listing fix opportunity: returns через INCORRECT_ITEM, DIFFICULT_TO_SETUP, NOT_AS_DESCRIBED
-    listing_issues = ["INCORRECT_ITEM", "DIFFICULT_TO_SETUP_NOT_COMPATIBLE", "NOT_AS_DESCRIBED_PICTURED", "DEFECTIVE"]
-    if "return_reason" in ret:
-        listing_issue_count = ret[ret["return_reason"].isin(listing_issues)].shape[0]
-        listing_pct = (100 * listing_issue_count / max(len(ret), 1)) if len(ret) else 0
-        listing_loss = ret[ret["return_reason"].isin(listing_issues)]["unit_price"].sum() if "unit_price" in ret else 0
-    else:
-        listing_issue_count = 0
-        listing_pct = 0
-        listing_loss = 0
+    listing_issues = ["INCORRECT_ITEM", "DIFFICULT_TO_SETUP_NOT_COMPATIBLE",
+                      "NOT_AS_DESCRIBED_PICTURED", "DEFECTIVE"]
+
+    # ============ 1. EXECUTIVE SUMMARY ============
+    n_returns = ret["return_order_id"].nunique()
+    n_skus = ret["sku"].nunique()
+    total_refund = ret["total_refund_amount"].sum()
+    listing_cnt = ret[ret["return_reason"].isin(listing_issues)].shape[0]
+    listing_pct = (100 * listing_cnt / max(len(ret), 1))
+    listing_loss = ret[ret["return_reason"].isin(listing_issues)]["lost"].sum()
+
+    # Seller vs Walmart split
+    seller_paid = ret[ret["refund_covered_by"] == "Seller"]["total_refund_amount"].sum()
+
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(224,49,49,0.10), rgba(250,176,5,0.08));
+                border-left: 4px solid #e03131; padding: 14px 18px; border-radius: 8px;
+                margin: 8px 0 16px 0;">
+        <strong style="font-size:1.05rem;">🔄 Returns Analysis</strong><br>
+        <span style="opacity:0.9;">
+        <b>{n_returns}</b> returns на <b>{n_skus}</b> SKU. Виплачено: <b>${total_refund:,.2f}</b>
+        (Seller's частина: <b>${seller_paid:,.2f}</b>).<br>
+        <b>{listing_pct:.0f}%</b> returns ({listing_cnt} cases) через <b>проблеми з лістингом</b>
+        — можна fix і повернути <b>${listing_loss:,.0f}</b>.
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ============ 2. KPI ============
+    today = datetime.now().date()
+    last30 = ret[ret["return_order_date"] >= pd.Timestamp(today - timedelta(days=30))]
+    prev30 = ret[(ret["return_order_date"] >= pd.Timestamp(today - timedelta(days=60))) &
+                 (ret["return_order_date"] < pd.Timestamp(today - timedelta(days=30)))]
+
+    growth = ((len(last30) - len(prev30)) / max(len(prev30), 1)) * 100 if len(prev30) > 0 else 0
+
+    completed = ret[ret["current_refund_status"] == "REFUND_COMPLETED"].shape[0]
+    completed_pct = (completed / max(len(ret), 1)) * 100
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric(T["returns_total"], f"{n_returns}")
-    c2.metric(T["returns_skus"], f"{n_skus}")
-    c3.metric(T["returns_refunded_amt"], f"${float(total_refund):,.2f}")
-    c4.metric("Listing Issues", f"{listing_pct:.0f}%")
+    c1.metric("📦 Total Returns", f"{n_returns}", f"{growth:+.0f}% vs prev30")
+    c2.metric("🏷️ Unique SKUs", f"{n_skus}")
+    c3.metric("💸 Total Refunded", f"${total_refund:,.0f}")
+    c4.metric("✅ Completed", f"{completed_pct:.0f}%")
 
-    # ===== Listing fix opportunity callout =====
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("⚠️ Listing Issues", f"{listing_pct:.0f}%")
+    c2.metric("💡 Recoverable $", f"${listing_loss:,.0f}")
+    c3.metric("👤 Seller Pays", f"${seller_paid:,.0f}")
+    c4.metric("🏛️ Walmart Pays", f"${total_refund - seller_paid:,.0f}")
+
+    # Special callout if listing issues high
     if listing_pct > 30:
         st.markdown(f"""
         <div class="opportunity-box">
-            <strong style="font-size:1.05rem;">{T['returns_fix_listings']}</strong><br>
-            <span style="opacity:0.9;">{listing_issue_count} returns ({listing_pct:.0f}%) {T['returns_fix_text']}.
-            Potential recoverable: <strong>${float(listing_loss):,.2f}</strong></span><br>
-            <span style="opacity:0.7; font-size:0.9rem;">→ Action: improve product descriptions, fix compatibility info, update photos</span>
+            <strong style="font-size:1.05rem;">💡 LISTING FIX OPPORTUNITY — ${listing_loss:,.0f} recoverable</strong><br>
+            <span style="opacity:0.9;">
+            {listing_cnt} returns ({listing_pct:.0f}%) сталось через INCORRECT_ITEM /
+            COMPATIBILITY / NOT_AS_DESCRIBED. Фікс листингів зменшить returns на 30-50%.
+            </span><br>
+            <span style="opacity:0.7; font-size:0.9rem;">
+            → Action: оновити compatibility info, фото, опис для топ-killer SKU
+            </span>
         </div>
         """, unsafe_allow_html=True)
 
-    # ===== Reasons & Status =====
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(f"#### 📊 {T['returns_by_reason']}")
-        if "return_reason" in ret:
-            reasons = ret.groupby("return_reason").agg(
-                cnt=("return_order_id", "count"),
-                qty=("quantity", "sum"),
-            ).reset_index().sort_values("cnt", ascending=False)
+    st.divider()
 
-            fig = px.bar(
-                reasons.sort_values("cnt"),
-                x="cnt", y="return_reason", orientation="h",
-                color="cnt", color_continuous_scale="Reds",
-                hover_data={"qty": True},
-            )
-            fig.update_layout(
-                height=450, template=theme["template"],
-                paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
-                showlegend=False, coloraxis_showscale=False,
-                margin=dict(l=0, r=0, t=20, b=0),
-                yaxis_title="",
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    # ============ 3. TIMELINE ============
+    st.markdown("#### 📈 Returns Timeline (daily)")
+
+    ret["date"] = ret["return_order_date"].dt.date
+    daily_ret = ret.groupby("date").agg(
+        returns=("return_order_id", "count"),
+        refund=("total_refund_amount", "sum"),
+    ).reset_index().sort_values("date")
+    daily_ret["ma7"] = daily_ret["returns"].rolling(7, min_periods=1).mean()
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=daily_ret["date"], y=daily_ret["returns"],
+        name="Returns count", marker_color="#e03131", yaxis="y",
+    ))
+    fig.add_trace(go.Scatter(
+        x=daily_ret["date"], y=daily_ret["ma7"],
+        name="7-day MA", mode="lines",
+        line=dict(color="#fab005", width=3, dash="dot"),
+    ))
+    fig.add_trace(go.Scatter(
+        x=daily_ret["date"], y=daily_ret["refund"],
+        name="Refund $", mode="lines+markers",
+        line=dict(color="#9775fa", width=2), yaxis="y2",
+        marker=dict(size=4),
+    ))
+    fig.update_layout(
+        height=400, template=theme["template"],
+        paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+        margin=dict(l=0, r=0, t=20, b=0),
+        yaxis=dict(title="Returns"),
+        yaxis2=dict(title="Refund $", overlaying="y", side="right", showgrid=False),
+        legend=dict(orientation="h", y=1.12),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ============ 4. REASONS + STATUS ============
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown("#### 📊 Return Reasons (with $ impact)")
+        reasons = ret.groupby("return_reason").agg(
+            cnt=("return_order_id", "count"),
+            qty=("quantity", "sum"),
+            lost=("lost", "sum"),
+        ).reset_index().sort_values("cnt", ascending=False)
+
+        fig = px.bar(
+            reasons.sort_values("cnt"),
+            x="cnt", y="return_reason", orientation="h",
+            color="lost", color_continuous_scale="Reds",
+            hover_data={"qty": True, "lost": ":$.2f"},
+            text="cnt",
+        )
+        fig.update_traces(textposition="outside")
+        fig.update_layout(
+            height=450, template=theme["template"],
+            paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+            showlegend=False, margin=dict(l=0, r=40, t=20, b=0),
+            yaxis_title="", coloraxis_colorbar=dict(title="$ Lost"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
     with c2:
-        st.markdown(f"#### 🎯 {T['returns_by_status']}")
-        if "current_refund_status" in ret:
-            statuses = ret["current_refund_status"].fillna("UNKNOWN").value_counts().reset_index()
-            statuses.columns = ["status", "count"]
-            colors = {
-                "REFUND_COMPLETED": "#51cf66",
-                "REFUND_INITIATED": "#fab005",
-                "CANCELLED": "#868e96",
-                "NOT_REFUNDED": "#e03131",
-                "UNKNOWN": "#adb5bd",
-            }
-            fig = px.pie(
-                statuses, values="count", names="status",
-                color="status", color_discrete_map=colors, hole=0.4,
+        st.markdown("#### 🎯 Refund Status")
+        statuses = ret["current_refund_status"].fillna("UNKNOWN").value_counts().reset_index()
+        statuses.columns = ["status", "count"]
+        colors = {
+            "REFUND_COMPLETED": "#51cf66", "REFUND_INITIATED": "#fab005",
+            "CANCELLED": "#868e96", "NOT_REFUNDED": "#e03131", "UNKNOWN": "#adb5bd",
+        }
+        fig = px.pie(
+            statuses, values="count", names="status",
+            color="status", color_discrete_map=colors, hole=0.5,
+        )
+        fig.update_traces(textposition="inside", textinfo="percent+label")
+        fig.update_layout(
+            height=450, template=theme["template"],
+            paper_bgcolor=theme["paper_bg"],
+            margin=dict(l=0, r=0, t=20, b=0),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Who pays
+        st.markdown("**💰 Refund Coverage:**")
+        coverage = ret.groupby("refund_covered_by").agg(
+            cnt=("return_order_id", "count"),
+            amt=("total_refund_amount", "sum"),
+        ).reset_index().sort_values("amt", ascending=False)
+        coverage = coverage[coverage["refund_covered_by"].notna() & (coverage["refund_covered_by"] != "")]
+        if not coverage.empty:
+            coverage.columns = ["Payer", "Returns", "Amount"]
+            st.dataframe(
+                coverage, use_container_width=True, hide_index=True,
+                column_config={"Amount": st.column_config.NumberColumn(format="$%.2f")},
             )
-            fig.update_layout(height=450, template=theme["template"], paper_bgcolor=theme["paper_bg"])
-            st.plotly_chart(fig, use_container_width=True)
 
-    # ===== Killer SKUs =====
-    st.markdown(f"#### 💸 {T['returns_killer_skus']}")
-    if "sku" in ret and "unit_price" in ret:
-        killer = ret[(ret["sku"].notna()) & (ret["sku"] != "")].copy()
-        killer["lost"] = killer["unit_price"].fillna(0) * killer["quantity"].fillna(1)
-        killer_agg = killer.groupby(["sku", "item_name"]).agg(
-            returns=("return_order_id", "count"),
-            units=("quantity", "sum"),
-            lost=("lost", "sum"),
-        ).reset_index().sort_values("lost", ascending=False).head(15)
-        killer_agg["item_name"] = killer_agg["item_name"].astype(str).str[:50]
-        killer_agg = killer_agg.rename(columns={
-            "sku": T["sku"],
-            "item_name": T["product"],
-            "returns": "Returns",
-            "units": "Units",
-            "lost": "$ Lost",
+    st.divider()
+
+    # ============ 5. KILLER SKUs ============
+    st.markdown("#### 💸 Top 15 Killer SKUs ($ lost)")
+    killer = ret[(ret["sku"].notna()) & (ret["sku"] != "")].copy()
+    killer_agg = killer.groupby(["sku", "item_name"]).agg(
+        returns=("return_order_id", "count"),
+        units=("quantity", "sum"),
+        lost=("lost", "sum"),
+    ).reset_index().sort_values("lost", ascending=False).head(15)
+    killer_agg["item_name"] = killer_agg["item_name"].astype(str).str[:45]
+
+    # Reason mix per SKU
+    sku_reasons = killer.groupby(["sku", "return_reason"]).size().reset_index(name="n")
+    main_reasons = sku_reasons.loc[sku_reasons.groupby("sku")["n"].idxmax()]
+    main_reasons = main_reasons[["sku", "return_reason"]].rename(columns={"return_reason": "main_reason"})
+    killer_agg = killer_agg.merge(main_reasons, on="sku", how="left")
+
+    killer_agg = killer_agg.rename(columns={
+        "sku": T["sku"], "item_name": T["product"],
+        "returns": "Returns", "units": "Units", "lost": "$ Lost",
+        "main_reason": "Main Reason",
+    })
+    st.dataframe(
+        killer_agg, use_container_width=True, hide_index=True, height=480,
+        column_config={"$ Lost": st.column_config.NumberColumn(format="$%.2f")},
+    )
+
+    st.divider()
+
+    # ============ 6. INSIGHTS ============
+    st.markdown("#### 🚨 Insights & Anomalies")
+
+    insights = []
+
+    # 1. Listing issue analysis
+    if listing_pct > 50:
+        insights.append({
+            "type": "crit",
+            "title": "🔴 Listing-driven returns dominate",
+            "text": f"<b>{listing_pct:.0f}%</b> returns через проблеми з лістингом. Це <b>${listing_loss:,.0f}</b> "
+                    f"втрат, які можна повернути ревью топ-10 листингів.",
         })
-        st.dataframe(killer_agg, use_container_width=True, hide_index=True, height=400,
-            column_config={
-                "$ Lost": st.column_config.NumberColumn(format="$%.2f"),
+
+    # 2. Specific killer
+    if len(killer_agg) > 0:
+        top_killer = killer_agg.iloc[0]
+        if top_killer["Returns"] >= 5:
+            insights.append({
+                "type": "warn",
+                "title": f"🎯 Worst SKU: {top_killer[T['sku']]}",
+                "text": f"<b>{int(top_killer['Returns'])}</b> returns причина: <b>{top_killer.get('Main Reason', 'N/A')}</b>. "
+                        f"Втрата ${top_killer['$ Lost']:,.0f}. Подивись listing.",
             })
 
-    # ===== Recent returns =====
-    st.markdown(f"#### 📋 {T['returns_recent']}")
-    if not ret.empty:
-        recent = ret[["return_order_date", "sku", "item_name", "return_reason",
-                      "quantity", "total_refund_amount", "current_refund_status", "carrier_name"]].copy()
-        recent = recent.sort_values("return_order_date", ascending=False).head(20)
-        recent["return_order_date"] = pd.to_datetime(recent["return_order_date"]).dt.strftime("%Y-%m-%d %H:%M")
-        recent["item_name"] = recent["item_name"].astype(str).str[:40]
-        recent = recent.rename(columns={
-            "return_order_date": T["returns_date"],
-            "sku": T["sku"],
-            "item_name": T["product"],
-            "return_reason": T["returns_reason"],
-            "quantity": T["returns_qty"],
-            "total_refund_amount": T["returns_refund_amt"],
-            "current_refund_status": T["returns_status_col"],
-            "carrier_name": T["returns_carrier"],
+    # 3. Growth trend
+    if growth > 50 and len(last30) > 5:
+        insights.append({
+            "type": "crit",
+            "title": "📈 Returns Spike",
+            "text": f"Returns зросли <b>+{growth:.0f}%</b> за останні 30 днів (з {len(prev30)} до {len(last30)}). "
+                    f"Перевір нові PPC кампанії та inventory quality.",
         })
-        st.dataframe(recent, use_container_width=True, hide_index=True, height=400,
-            column_config={
-                T["returns_refund_amt"]: st.column_config.NumberColumn(format="$%.2f"),
-            })
+    elif growth < -30:
+        insights.append({
+            "type": "info",
+            "title": "📉 Returns Declining",
+            "text": f"Returns ↓ <b>{growth:.0f}%</b> — ймовірно last_30 ще не повністю отримав returns "
+                    f"(вікно 30 днів на повернення).",
+        })
+
+    # 4. Refund completion
+    if completed_pct < 50:
+        insights.append({
+            "type": "warn",
+            "title": "⏳ Slow Refund Completion",
+            "text": f"Тільки <b>{completed_pct:.0f}%</b> refunds completed. Решта в процесі або blocked.",
+        })
+
+    # 5. NO_LONGER_WANTED vs INCORRECT_ITEM ratio
+    nlw = ret[ret["return_reason"] == "NO_LONGER_WANTED"].shape[0]
+    inc = ret[ret["return_reason"] == "INCORRECT_ITEM"].shape[0]
+    if inc > nlw * 0.8:
+        insights.append({
+            "type": "crit",
+            "title": "⚠️ INCORRECT_ITEM Epidemic",
+            "text": f"INCORRECT_ITEM ({inc}) майже = NO_LONGER_WANTED ({nlw}). Це не норма — "
+                    f"листинги вводять в оману щодо compatibility.",
+        })
+
+    # 6. Cancellation rate
+    cancelled_pct = (ret[ret["current_refund_status"] == "CANCELLED"].shape[0] / max(len(ret), 1)) * 100
+    if cancelled_pct > 15:
+        insights.append({
+            "type": "info",
+            "title": "↩️ High Return Cancellation",
+            "text": f"<b>{cancelled_pct:.0f}%</b> returns скасовано клієнтом (передумали повертати).",
+        })
+
+    if insights:
+        for ins in insights:
+            cls = {"crit": "severity-crit", "warn": "severity-warn", "info": "severity-info"}[ins["type"]]
+            st.markdown(f"""
+            <div class="{cls}">
+                <strong>{ins['title']}</strong><br>
+                <span style="opacity:0.9;">{ins['text']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.success("✅ Returns metrics within normal range.")
+
+    st.divider()
+
+    # ============ 7. RECENT RETURNS ============
+    st.markdown("#### 📋 Recent 20 Returns")
+    recent = ret[["return_order_date", "sku", "item_name", "return_reason",
+                  "quantity", "total_refund_amount", "current_refund_status",
+                  "refund_covered_by", "carrier_name"]].copy()
+    recent = recent.sort_values("return_order_date", ascending=False).head(20)
+    recent["return_order_date"] = recent["return_order_date"].dt.strftime("%Y-%m-%d %H:%M")
+    recent["item_name"] = recent["item_name"].astype(str).str[:40]
+    recent = recent.rename(columns={
+        "return_order_date": T["returns_date"], "sku": T["sku"],
+        "item_name": T["product"], "return_reason": T["returns_reason"],
+        "quantity": T["returns_qty"], "total_refund_amount": T["returns_refund_amt"],
+        "current_refund_status": T["returns_status_col"],
+        "refund_covered_by": "Paid By", "carrier_name": T["returns_carrier"],
+    })
+    st.dataframe(
+        recent, use_container_width=True, hide_index=True, height=420,
+        column_config={T["returns_refund_amt"]: st.column_config.NumberColumn(format="$%.2f")},
+    )
 
 
 # ============================================================
