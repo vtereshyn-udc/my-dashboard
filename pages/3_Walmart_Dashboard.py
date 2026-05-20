@@ -2685,15 +2685,15 @@ def ai_executive_summary(data, lang):
             pass
 
     # ============ PROMPT ============
-    lang_inst = {
-        "RU": "Отвечай на русском. Tон: senior partner консалтинга. Прямо, без воды, с конкретикой.",
-        "UA": "Відповідай українською. Тон: senior partner консалтингу. Прямо, без води, з конкретикою.",
-        "EN": "Respond in English. Tone: senior consulting partner. Direct, no fluff, with specifics.",
+    lang_strict = {
+        "RU": "ОБЯЗАТЕЛЬНО пиши ТОЛЬКО на РУССКОМ языке. Каждое слово. Никакого английского, никакой латиницы (кроме SKU кодов и $).",
+        "UA": "ОБОВ'ЯЗКОВО пиши ТІЛЬКИ УКРАЇНСЬКОЮ мовою. Кожне слово. Жодної англійської, жодної латиниці (окрім SKU кодів та $).",
+        "EN": "Respond in English only.",
     }.get(lang, "Respond in English.")
 
-    prompt = f"""You are a SENIOR PARTNER at McKinsey/BCG (15+ years experience) advising UDC Mower Parts LLC — a Walmart Marketplace seller of lawn mower replacement parts (third-party seller, US market, WFS-fulfilled, with SEM ads).
+    prompt = f"""{lang_strict}
 
-{lang_inst}
+You are a SENIOR PARTNER at McKinsey/BCG (15+ years experience) advising UDC Mower Parts LLC — a Walmart Marketplace seller of lawn mower replacement parts (third-party seller, US market, WFS-fulfilled, with SEM ads).
 
 INDUSTRY CONTEXT (USE THIS FOR BENCHMARKING):
 • Walmart 3P seller margins: healthy = 35-50%, top decile >50%
@@ -2710,40 +2710,42 @@ CURRENT BUSINESS STATE (JSON snapshot):
 WRITE A PARTNER-LEVEL BRIEFING in this EXACT HTML format (use <b>, <br>, no markdown):
 
 <b>📊 SITUATION ASSESSMENT</b><br>
-[3-4 sentences. Frame the business: where it stands vs benchmarks, momentum (accelerating/decelerating/stable), key tension or thesis. Use specific % vs industry. Reference seasonality if relevant. Tone: like writing to a CEO who has 30 seconds.]
+[3-4 sentences. Frame the business: where it stands vs benchmarks, momentum, key tension. Use specific % vs industry. Tone: writing to a CEO who has 30 seconds.]
 
 <b>💎 STRATEGIC THESIS</b><br>
-[1-2 sentences. What is THE strategic pattern here? E.g. "Margin expansion is real but fragile — listings quality is the unlock for next $20K." Be insightful, not descriptive.]
+[1-2 sentences. What is THE strategic pattern here? Be insightful.]
 
 <b>🎯 TOP-3 MOVES (next 7 days)</b><br>
-1. <b>[Action title]</b> — [Why it matters NOW + $ impact estimate + specific SKUs/numbers]<br>
-2. <b>[Action title]</b> — [Rationale with quantified impact]<br>
+1. <b>[Action title]</b> — [Why NOW + $ impact + specific SKUs]<br>
+2. <b>[Action title]</b> — [Rationale + quantified impact]<br>
 3. <b>[Action title]</b> — [What to do + expected outcome]<br>
 
 <b>⚠️ MATERIAL RISKS</b><br>
-• <b>[Risk name]</b>: [$ exposure + probability + mitigation]<br>
-• <b>[Risk name]</b>: [Same format]<br>
+• <b>[Risk]</b>: [$ exposure + mitigation]<br>
+• <b>[Risk]</b>: [Same]<br>
 
 <b>📈 UPSIDE LEVERS</b><br>
-• <b>[Lever]</b>: [$ upside if pulled + effort required (low/med/high)]<br>
-• <b>[Lever]</b>: [Same format]<br>
+• <b>[Lever]</b>: [$ upside + effort low/med/high]<br>
+• <b>[Lever]</b>: [Same]<br>
 
 <b>🔮 THE ONE METRIC</b><br>
-[Single KPI to obsess over next 30 days + why + threshold for action. E.g. "Returns-from-listings %. Threshold: if it crosses 60% by June, halt new SKU launches and run listing audit."]
+[Single KPI to obsess over + threshold for action.]
 
 <b>📞 BOARD QUESTION</b><br>
-[One sharp question a board member would ask. Provoke thinking. E.g. "If WFS fees increase 15% next quarter (as Walmart signaled), what's our pivot — raise prices or reduce SKU count?"]
+[One sharp question that provokes thinking.]
 
 REQUIREMENTS:
 • Cite EXACT $ amounts and SKU codes from data
-• Compare to benchmarks (e.g. "your margin 42% vs industry 35-50%, top quartile")
-• Use Pareto thinking (which 20% drives 80%)
-• Identify SECOND-ORDER effects (e.g. "fix listings → fewer returns → better seller rating → better BB win → more sales")
-• Never give generic advice ("improve marketing") — always specific actions
-• If data shows opportunity, quantify it. If shows risk, frame the bet.
+• Compare to industry benchmarks
+• Pareto thinking (20% drives 80%)
+• Second-order effects
+• Never give generic advice — always specific actions with numbers
 • Maximum 350 words total
 
-Be a top consultant. Write like Roger Martin or Michael Porter would. Sharp, contrarian if needed, always actionable."""
+CRITICAL LANGUAGE RULE: {lang_strict}
+Headers like "SITUATION ASSESSMENT", "STRATEGIC THESIS", "TOP-3 MOVES" — ALSO translate them to the required language. SKU codes (e.g. 942-05056A) and $ amounts stay as-is, everything else MUST be in the required language.
+
+Be a top consultant. Sharp, contrarian if needed, always actionable. WRITE EVERYTHING IN: {lang_strict}"""
 
     import requests as req
     MODELS = [
@@ -2751,16 +2753,27 @@ Be a top consultant. Write like Roger Martin or Michael Porter would. Sharp, con
         "gemini-2.5-flash",
         "gemini-flash-latest",
     ]
+
+    system_lang = {
+        "RU": "Ты senior partner McKinsey. Пиши ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ. Это критическое требование. Каждое предложение, каждый заголовок, каждое слово — на русском. SKU коды и числа $ оставь как есть, все остальное переводи на русский. Никогда не используй английский, даже для технических терминов — используй русские эквиваленты или транслитерацию.",
+        "UA": "Ти senior partner McKinsey. Пиши ВИКЛЮЧНО УКРАЇНСЬКОЮ МОВОЮ. Це критична вимога. Кожне речення, кожен заголовок, кожне слово — українською. SKU коди та числа $ залиш як є, все інше перекладай українською. Ніколи не використовуй англійську, навіть для технічних термінів — використовуй українські еквіваленти або транслітерацію.",
+        "EN": "You are a senior McKinsey partner. Write everything in English.",
+    }.get(lang, "Write in English.")
+
     for model in MODELS:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            r = req.post(url, json={
+            payload = {
+                "system_instruction": {
+                    "parts": [{"text": system_lang}]
+                },
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
-                    "temperature": 0.7,  # Трохи креативу для нестандартних інсайтів
+                    "temperature": 0.7,
                     "maxOutputTokens": 1500,
                 }
-            }, timeout=60)
+            }
+            r = req.post(url, json=payload, timeout=60)
             result = r.json()
             if "error" in result:
                 continue
