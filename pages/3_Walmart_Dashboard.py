@@ -1,21 +1,17 @@
 """
-Walmart Reports Dashboard v3.1 — SMART BI
-ЗМІНИ vs v3.0:
-- 🆕 SMART сектори: кожен розділ тепер має 7-блочну структуру:
-  1. Executive Summary  (TL;DR з ключовими числами)
-  2. KPI Row            (5-8 cards)
-  3. Primary Chart      (тренд + Moving Average)
-  4. Breakdown          (по категоріях, drill-down)
-  5. Sub-charts         (pie / bar / waterfall)
-  6. Anomalies & Insights (автоматичні висновки)
-  7. Detail Table       (для drill-down)
-- 🆕 Money Flow Waterfall в Settlement
-- 🆕 ETA Scatter Timeline в WFS
-- 🆕 Reason × $ Lost heatmap в Returns
-- 🆕 Виправлено баг walmart.orders (text → timestamp cast)
+Walmart Reports Dashboard v3.2 — SMART BI з AI Executive Briefing
+ЗМІНИ vs v3.1:
+- 🆕 🧠 AI Executive Briefing у Overview
+  Gemini автоматично аналізує всі дані (orders, settlement, returns, wfs)
+  і пише executive briefing з трьома секціями:
+    📊 SITUATION — де бізнес зараз
+    🎯 TOP-3 ACTIONS — найважливіші дії на тиждень з $ impact
+    ⚠️ RISKS & OPPORTUNITIES
+    🔮 ONE THING TO WATCH
+- Виправлено tz-aware/naive datetime errors
 
-v3.0: КАТЕГОРІЇ в sidebar + 3 режими (Overview/Focus/All)
-v2.x: 3 нові розділи (WFS, Settlement, Returns) + Orders
+v3.1: SMART BI structure (Executive Summary, KPIs, Waterfall, Insights)
+v3.0: Категорії + 3 режими (Overview/Focus/All)
 """
 
 import streamlit as st
@@ -25,6 +21,7 @@ import plotly.graph_objects as go
 from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta
 import os
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -713,8 +710,8 @@ def render_orders(data, T, theme):
 
     # ============ Підготовка даних ============
     df = orders.copy()
-    # order_date — text → datetime
-    df["order_dt"] = pd.to_datetime(df["order_date"], errors='coerce')
+    # order_date — text → datetime (naive, без tz)
+    df["order_dt"] = pd.to_datetime(df["order_date"], errors='coerce', utc=True).dt.tz_localize(None)
     df = df[df["order_dt"].notna()].copy()
     df["line_total"] = pd.to_numeric(df["line_total"], errors='coerce').fillna(0)
     df["tax_total"] = pd.to_numeric(df["tax_total"], errors='coerce').fillna(0)
@@ -1074,8 +1071,8 @@ def render_wfs_shipments(data, T, theme):
     st.caption(T["wfs_subtitle"])
 
     # ============ Підготовка ============
-    wfs["expected_delivery_date"] = pd.to_datetime(wfs["expected_delivery_date"], errors='coerce')
-    wfs["po_create_date"] = pd.to_datetime(wfs["po_create_date"], errors='coerce')
+    wfs["expected_delivery_date"] = pd.to_datetime(wfs["expected_delivery_date"], errors='coerce', utc=True).dt.tz_localize(None)
+    wfs["po_create_date"] = pd.to_datetime(wfs["po_create_date"], errors='coerce', utc=True).dt.tz_localize(None)
     wfs["expected_units"] = pd.to_numeric(wfs["expected_units"], errors='coerce').fillna(0)
     wfs["received_units"] = pd.to_numeric(wfs["received_units"], errors='coerce').fillna(0)
 
@@ -1349,7 +1346,7 @@ def render_settlement(data, T, theme):
     st.caption(T["settlement_subtitle"])
 
     # ============ Підготовка ============
-    settle["report_date"] = pd.to_datetime(settle["report_date"], errors='coerce')
+    settle["report_date"] = pd.to_datetime(settle["report_date"], errors='coerce', utc=True).dt.tz_localize(None)
     settle["amount"] = pd.to_numeric(settle["amount"], errors='coerce').fillna(0)
     settle["total_payable"] = pd.to_numeric(settle["total_payable"], errors='coerce').fillna(0)
 
@@ -1684,7 +1681,7 @@ def render_returns(data, T, theme):
     st.caption(T["returns_subtitle"])
 
     # ============ Підготовка ============
-    ret["return_order_date"] = pd.to_datetime(ret["return_order_date"], errors='coerce')
+    ret["return_order_date"] = pd.to_datetime(ret["return_order_date"], errors='coerce', utc=True).dt.tz_localize(None)
     ret["unit_price"] = pd.to_numeric(ret["unit_price"], errors='coerce').fillna(0)
     ret["quantity"] = pd.to_numeric(ret["quantity"], errors='coerce').fillna(1)
     ret["total_refund_amount"] = pd.to_numeric(ret["total_refund_amount"], errors='coerce').fillna(0)
@@ -2553,12 +2550,228 @@ def render_ai_section(T, lang):
 
 
 # ============================================================
-# 🎯 OVERVIEW MODE — швидке зведення з всіх розділів
+# 🧠 AI EXECUTIVE SUMMARY (для Overview)
 # ============================================================
+
+def ai_executive_summary(data, lang):
+    """Готує дані для AI і просить написати executive summary."""
+    api_key = st.secrets.get("GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return None, None
+
+    # Збираємо stats з усіх таблиць
+    stats = {}
+
+    # Orders
+    orders = data.get("orders", pd.DataFrame())
+    if not orders.empty:
+        try:
+            o = orders.copy()
+            o["order_dt"] = pd.to_datetime(o["order_date"], errors='coerce', utc=True).dt.tz_localize(None)
+            o["line_total"] = pd.to_numeric(o["line_total"], errors='coerce').fillna(0)
+            o["quantity"] = pd.to_numeric(o["quantity"], errors='coerce').fillna(0)
+            o = o[o["order_dt"].notna()]
+            today = datetime.now().date()
+            last30 = o[o["order_dt"] >= pd.Timestamp(today - timedelta(days=30))]
+            prev30 = o[(o["order_dt"] >= pd.Timestamp(today - timedelta(days=60))) &
+                       (o["order_dt"] < pd.Timestamp(today - timedelta(days=30)))]
+            rev30 = last30["line_total"].sum()
+            rev_prev30 = prev30["line_total"].sum()
+            growth = ((rev30 - rev_prev30) / max(rev_prev30, 1)) * 100 if rev_prev30 > 0 else 0
+            cancel_rate = (o["line_status"].str.lower() == "cancelled").sum() / max(len(o), 1) * 100
+            top_skus = last30.groupby("sku")["line_total"].sum().nlargest(5).to_dict()
+            stats["orders"] = {
+                "total_line_items": len(o),
+                "unique_orders": o["customer_order_id"].nunique(),
+                "revenue_30d": float(rev30),
+                "revenue_prev30": float(rev_prev30),
+                "growth_pct": float(growth),
+                "cancel_rate_pct": float(cancel_rate),
+                "top_5_skus_last30": {k: float(v) for k, v in top_skus.items()},
+            }
+        except Exception as e:
+            stats["orders_error"] = str(e)
+
+    # Settlement
+    settle = data.get("settlement", pd.DataFrame())
+    if not settle.empty:
+        try:
+            s = settle.copy()
+            s["amount"] = pd.to_numeric(s["amount"], errors='coerce').fillna(0)
+            s["total_payable"] = pd.to_numeric(s["total_payable"], errors='coerce').fillna(0)
+            payments = s[s["transaction_type"] == "PaymentSummary"]
+            net_paid = payments["total_payable"].sum()
+            total_sales = s[s["transaction_type"] == "Sale"]["amount"].sum()
+            total_refunds = s[s["transaction_type"] == "Refund"]["amount"].sum()
+            total_fees = s[s["transaction_type"].isin(["Service Fee", "Campaigns"])]["amount"].sum()
+            margin = (net_paid / max(total_sales, 1)) * 100
+            stats["settlement"] = {
+                "net_paid_lifetime": float(net_paid),
+                "gross_sales": float(total_sales),
+                "total_refunds": float(abs(total_refunds)),
+                "total_fees_ads": float(abs(total_fees)),
+                "margin_pct": float(margin),
+                "periods_count": int(s["report_date"].nunique()) if "report_date" in s else 0,
+            }
+        except Exception as e:
+            stats["settlement_error"] = str(e)
+
+    # Returns
+    ret = data.get("returns", pd.DataFrame())
+    if not ret.empty:
+        try:
+            r = ret.copy()
+            r["unit_price"] = pd.to_numeric(r["unit_price"], errors='coerce').fillna(0)
+            r["quantity"] = pd.to_numeric(r["quantity"], errors='coerce').fillna(1)
+            r["total_refund_amount"] = pd.to_numeric(r["total_refund_amount"], errors='coerce').fillna(0)
+            r["lost"] = r["unit_price"] * r["quantity"]
+            listing_issues = ["INCORRECT_ITEM", "DIFFICULT_TO_SETUP_NOT_COMPATIBLE",
+                              "NOT_AS_DESCRIBED_PICTURED", "DEFECTIVE"]
+            listing_cnt = r[r["return_reason"].isin(listing_issues)].shape[0]
+            listing_loss = r[r["return_reason"].isin(listing_issues)]["lost"].sum()
+            top_reasons = r["return_reason"].value_counts().head(5).to_dict()
+            killer = r.groupby("sku")["lost"].sum().nlargest(5).to_dict()
+            stats["returns"] = {
+                "total_returns": int(r["return_order_id"].nunique()),
+                "total_refund_amount": float(r["total_refund_amount"].sum()),
+                "listing_issues_count": int(listing_cnt),
+                "listing_issues_pct": float(listing_cnt / max(len(r), 1) * 100),
+                "recoverable_if_fixed": float(listing_loss),
+                "top_5_reasons": top_reasons,
+                "top_5_killer_skus": {k: float(v) for k, v in killer.items()},
+                "seller_paid": float(r[r["refund_covered_by"] == "Seller"]["total_refund_amount"].sum()),
+            }
+        except Exception as e:
+            stats["returns_error"] = str(e)
+
+    # WFS
+    wfs = data.get("wfs_shipments", pd.DataFrame())
+    if not wfs.empty:
+        try:
+            w = wfs.copy()
+            w["expected_units"] = pd.to_numeric(w["expected_units"], errors='coerce').fillna(0)
+            w["received_units"] = pd.to_numeric(w["received_units"], errors='coerce').fillna(0)
+            awaiting = w[w["po_status"] == "AWAITING_DELIVERY"]
+            pending = int((awaiting["expected_units"] - awaiting["received_units"]).sum())
+            stats["logistics"] = {
+                "active_shipments": int(awaiting["shipment_id"].nunique()),
+                "pending_units": pending,
+                "pending_skus": int(awaiting["sku"].nunique()),
+                "closed_total": int(w[w["po_status"] == "CLOSED"]["shipment_id"].nunique()),
+            }
+        except Exception as e:
+            stats["logistics_error"] = str(e)
+
+    # Items / Catalog problems
+    items = data.get("items", pd.DataFrame())
+    if not items.empty and "publish_status" in items:
+        try:
+            stats["catalog"] = {
+                "total_skus": len(items),
+                "unpublished_skus": int((~items["publish_status"].isin(["PUBLISHED"])).sum()),
+            }
+        except Exception:
+            pass
+
+    # CAP discount
+    buybox = data.get("buybox", pd.DataFrame())
+    if not buybox.empty and "price_diff_pct" in buybox:
+        try:
+            heavy = buybox[buybox["price_diff_pct"].fillna(0) > 0.20]
+            stats["pricing"] = {
+                "cap_heavy_count": int(len(heavy)),
+                "hidden_loss_per_unit": float((heavy["seller_item_price"] - heavy["buybox_item_price"]).sum()) if len(heavy) > 0 else 0,
+            }
+        except Exception:
+            pass
+
+    # ============ PROMPT ============
+    lang_inst = {
+        "RU": "Отвечай на русском, кратко, без воды.",
+        "UA": "Відповідай українською, стисло, без води.",
+        "EN": "Respond in English, concise, no fluff.",
+    }.get(lang, "Respond in English.")
+
+    prompt = f"""You are a senior McKinsey-level analyst for a Walmart Marketplace seller (UDC Mower Parts LLC — lawn mower replacement parts).
+
+{lang_inst}
+
+Below is the current business state as JSON snapshot. Analyze it and write a sharp executive briefing.
+
+DATA:
+{json.dumps(stats, indent=2, default=str)}
+
+Write the briefing in this EXACT format (use HTML tags like <b>, <br>, no markdown):
+
+<b>📊 SITUATION</b><br>
+[2-3 sentences: where business stands now, top numbers, growth direction]
+
+<b>🎯 TOP-3 ACTIONS THIS WEEK</b><br>
+1. [Most urgent action with $ impact estimate]<br>
+2. [Second action with rationale]<br>
+3. [Third action]<br>
+
+<b>⚠️ RISKS & OPPORTUNITIES</b><br>
+• [Risk 1 with $ exposure]<br>
+• [Opportunity 1 with $ upside]<br>
+
+<b>🔮 ONE THING TO WATCH</b><br>
+[The one metric or trend that matters most over next 30 days]
+
+Be specific with numbers from data. Use $ amounts. Reference SKU codes where applicable. Maximum 200 words total."""
+
+    import requests as req
+    MODELS = [
+        st.secrets.get("GEMINI_MODEL", "gemini-2.0-flash"),
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+    ]
+    for model in MODELS:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            r = req.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=45)
+            result = r.json()
+            if "error" in result:
+                continue
+            if "candidates" in result and result["candidates"]:
+                return result["candidates"][0]["content"]["parts"][0]["text"], model
+        except Exception:
+            continue
+    return None, None
+
+
+
+
+
 
 def render_overview(data, T, theme, lang):
     """Показує найважливіше з кожного розділу в одному вікні.
     Як виконавчий summary."""
+
+    # ============ 🧠 AI EXECUTIVE SUMMARY ============
+    api_key = st.secrets.get("GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+    if api_key:
+        with st.spinner("🧠 AI analyzes your business state..."):
+            ai_summary, ai_model = ai_executive_summary(data, lang)
+
+        if ai_summary:
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, rgba(151,117,250,0.12), rgba(124,159,255,0.08));
+                        border-left: 4px solid #9775fa; padding: 20px 24px; border-radius: 12px;
+                        margin: 8px 0 20px 0; line-height: 1.8;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <strong style="font-size:1.15rem;">🧠 AI Executive Briefing</strong>
+                    <span style="opacity:0.6; font-size:0.8rem;">Model: {ai_model}</span>
+                </div>
+                <div style="font-size:0.98rem;">{ai_summary}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ AI summary failed. Check GEMINI_API_KEY in Secrets.")
+    else:
+        st.info("💡 Add `GEMINI_API_KEY` to Streamlit Secrets to enable AI Executive Briefing")
+
+    st.divider()
 
     # ============ 💵 SALES & MONEY ============
     st.markdown(f"### {T['cat_sales']}")
@@ -2579,10 +2792,10 @@ def render_overview(data, T, theme, lang):
     # Orders KPI
     if not orders.empty:
         date_col = _pick_col(orders, "order_date", "purchase_date", "created_at")
-        amount_col = _pick_col(orders, "total_amount", "order_total", "amount")
+        amount_col = _pick_col(orders, "total_amount", "order_total", "amount", "line_total")
         if date_col:
             orders_df = orders.copy()
-            orders_df[date_col] = pd.to_datetime(orders_df[date_col], errors='coerce')
+            orders_df[date_col] = pd.to_datetime(orders_df[date_col], errors='coerce', utc=True).dt.tz_localize(None)
             last30 = orders_df[orders_df[date_col] >= pd.Timestamp(datetime.now().date() - timedelta(days=30))]
             c3.metric("📦 Orders 30d", f"{len(last30):,}")
             if amount_col:
@@ -2594,7 +2807,7 @@ def render_overview(data, T, theme, lang):
         payments = settle[settle["transaction_type"] == "PaymentSummary"]
         if not payments.empty:
             ptime = payments[["report_date", "total_payable"]].copy()
-            ptime["report_date"] = pd.to_datetime(ptime["report_date"])
+            ptime["report_date"] = pd.to_datetime(ptime["report_date"], errors='coerce', utc=True).dt.tz_localize(None)
             ptime = ptime.sort_values("report_date").tail(12)
             ptime["color"] = ptime["total_payable"].apply(lambda x: "Deposit" if x > 0 else "Debit")
             fig = px.bar(ptime, x="report_date", y="total_payable", color="color",
@@ -2631,7 +2844,9 @@ def render_overview(data, T, theme, lang):
 
     # Найближчі поставки
     if not wfs.empty:
-        upcoming = wfs[(wfs["po_status"] == "AWAITING_DELIVERY") & (wfs["expected_delivery_date"].notna())]
+        wfs_copy = wfs.copy()
+        wfs_copy["expected_delivery_date"] = pd.to_datetime(wfs_copy["expected_delivery_date"], errors='coerce', utc=True).dt.tz_localize(None)
+        upcoming = wfs_copy[(wfs_copy["po_status"] == "AWAITING_DELIVERY") & (wfs_copy["expected_delivery_date"].notna())]
         if not upcoming.empty:
             upcoming_agg = upcoming.groupby("shipment_id").agg(
                 fc=("fc_name", "first"),
