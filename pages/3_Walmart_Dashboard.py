@@ -2748,9 +2748,11 @@ Headers like "SITUATION ASSESSMENT", "STRATEGIC THESIS", "TOP-3 MOVES" — ALSO 
 Be a top consultant. Sharp, contrarian if needed, always actionable. WRITE EVERYTHING IN: {lang_strict}"""
 
     import requests as req
+    # Сильні моделі першими — flash-latest тільки якщо інші failed
     MODELS = [
-        st.secrets.get("GEMINI_MODEL", "gemini-2.0-flash"),
-        "gemini-2.5-flash",
+        st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        "gemini-2.0-flash",
+        "gemini-2.5-pro",
         "gemini-flash-latest",
     ]
 
@@ -2760,6 +2762,7 @@ Be a top consultant. Sharp, contrarian if needed, always actionable. WRITE EVERY
         "EN": "You are a senior McKinsey partner. Write everything in English.",
     }.get(lang, "Write in English.")
 
+    last_error = None
     for model in MODELS:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
@@ -2770,17 +2773,64 @@ Be a top consultant. Sharp, contrarian if needed, always actionable. WRITE EVERY
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "temperature": 0.7,
-                    "maxOutputTokens": 1500,
-                }
+                    "maxOutputTokens": 4000,
+                    "topP": 0.95,
+                },
+                "safetySettings": [
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                ],
             }
-            r = req.post(url, json=payload, timeout=60)
+            r = req.post(url, json=payload, timeout=90)
             result = r.json()
+
+            # Логуємо що відбувається (для дебагу)
             if "error" in result:
+                last_error = f"{model}: {result['error'].get('message', 'unknown')[:100]}"
                 continue
-            if "candidates" in result and result["candidates"]:
-                return result["candidates"][0]["content"]["parts"][0]["text"], model
-        except Exception:
+
+            if "candidates" not in result or not result["candidates"]:
+                last_error = f"{model}: no candidates"
+                continue
+
+            candidate = result["candidates"][0]
+
+            # Перевіряємо чи модель не обірвалась
+            finish_reason = candidate.get("finishReason", "")
+            if finish_reason == "MAX_TOKENS":
+                last_error = f"{model}: hit MAX_TOKENS"
+                # все одно беремо те що є — це краще ніж нічого
+            elif finish_reason == "SAFETY":
+                last_error = f"{model}: blocked by safety"
+                continue
+
+            if "content" not in candidate or "parts" not in candidate["content"]:
+                last_error = f"{model}: empty content"
+                continue
+
+            text_parts = [p.get("text", "") for p in candidate["content"]["parts"] if p.get("text")]
+            if not text_parts:
+                last_error = f"{model}: no text in parts"
+                continue
+
+            full_text = "".join(text_parts)
+
+            # Перевіряємо мінімальну довжину
+            if len(full_text) < 300:
+                last_error = f"{model}: too short ({len(full_text)} chars)"
+                continue
+
+            return full_text, model
+
+        except Exception as e:
+            last_error = f"{model}: {str(e)[:100]}"
             continue
+
+    # Якщо всі моделі failed — повертаємо None з error
+    if last_error:
+        print(f"⚠️ AI Briefing failed: {last_error}")
     return None, None
 
 
