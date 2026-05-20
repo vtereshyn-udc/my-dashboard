@@ -1,17 +1,16 @@
 """
-Walmart Reports Dashboard v3.2 — SMART BI з AI Executive Briefing
-ЗМІНИ vs v3.1:
-- 🆕 🧠 AI Executive Briefing у Overview
-  Gemini автоматично аналізує всі дані (orders, settlement, returns, wfs)
-  і пише executive briefing з трьома секціями:
-    📊 SITUATION — де бізнес зараз
-    🎯 TOP-3 ACTIONS — найважливіші дії на тиждень з $ impact
-    ⚠️ RISKS & OPPORTUNITIES
-    🔮 ONE THING TO WATCH
-- Виправлено tz-aware/naive datetime errors
+Walmart Reports Dashboard v3.3 — PARTNER-LEVEL AI Briefing
+ЗМІНИ vs v3.2:
+- 🆕 AI промпт переписано на SENIOR PARTNER level (McKinsey/BCG tone)
+- Додано industry benchmarks (margin 35-50%, return rate 5-8%, TACoS 8-15%)
+- 7 секцій briefing: Situation → Strategic Thesis → Top-3 Moves →
+  Material Risks → Upside Levers → The One Metric → Board Question
+- Преміальний дизайн (gradient background, заголовок Confidential)
+- Temperature 0.7 + maxOutputTokens 1500 для глибших інсайтів
 
-v3.1: SMART BI structure (Executive Summary, KPIs, Waterfall, Insights)
-v3.0: Категорії + 3 режими (Overview/Focus/All)
+v3.2: AI Executive Briefing у Overview
+v3.1: SMART BI 7-section structure
+v3.0: Категорії + 3 режими
 """
 
 import streamlit as st
@@ -2687,38 +2686,64 @@ def ai_executive_summary(data, lang):
 
     # ============ PROMPT ============
     lang_inst = {
-        "RU": "Отвечай на русском, кратко, без воды.",
-        "UA": "Відповідай українською, стисло, без води.",
-        "EN": "Respond in English, concise, no fluff.",
+        "RU": "Отвечай на русском. Tон: senior partner консалтинга. Прямо, без воды, с конкретикой.",
+        "UA": "Відповідай українською. Тон: senior partner консалтингу. Прямо, без води, з конкретикою.",
+        "EN": "Respond in English. Tone: senior consulting partner. Direct, no fluff, with specifics.",
     }.get(lang, "Respond in English.")
 
-    prompt = f"""You are a senior McKinsey-level analyst for a Walmart Marketplace seller (UDC Mower Parts LLC — lawn mower replacement parts).
+    prompt = f"""You are a SENIOR PARTNER at McKinsey/BCG (15+ years experience) advising UDC Mower Parts LLC — a Walmart Marketplace seller of lawn mower replacement parts (third-party seller, US market, WFS-fulfilled, with SEM ads).
 
 {lang_inst}
 
-Below is the current business state as JSON snapshot. Analyze it and write a sharp executive briefing.
+INDUSTRY CONTEXT (USE THIS FOR BENCHMARKING):
+• Walmart 3P seller margins: healthy = 35-50%, top decile >50%
+• Return rate benchmark for auto/lawn parts: 5-8% (industry avg)
+• Listing-quality returns (INCORRECT_ITEM/COMPATIBILITY) should be <20% of total returns
+• PPC TACoS healthy range: 8-15% of revenue
+• Cancel rate healthy: <3%
+• Walmart CAP discount (Competitive Price Adjustment) hidden margin loss is a known issue for 3P sellers
+• Q2 (Apr-Jun) is peak season for lawn mower parts (mowing season starts)
 
-DATA:
+CURRENT BUSINESS STATE (JSON snapshot):
 {json.dumps(stats, indent=2, default=str)}
 
-Write the briefing in this EXACT format (use HTML tags like <b>, <br>, no markdown):
+WRITE A PARTNER-LEVEL BRIEFING in this EXACT HTML format (use <b>, <br>, no markdown):
 
-<b>📊 SITUATION</b><br>
-[2-3 sentences: where business stands now, top numbers, growth direction]
+<b>📊 SITUATION ASSESSMENT</b><br>
+[3-4 sentences. Frame the business: where it stands vs benchmarks, momentum (accelerating/decelerating/stable), key tension or thesis. Use specific % vs industry. Reference seasonality if relevant. Tone: like writing to a CEO who has 30 seconds.]
 
-<b>🎯 TOP-3 ACTIONS THIS WEEK</b><br>
-1. [Most urgent action with $ impact estimate]<br>
-2. [Second action with rationale]<br>
-3. [Third action]<br>
+<b>💎 STRATEGIC THESIS</b><br>
+[1-2 sentences. What is THE strategic pattern here? E.g. "Margin expansion is real but fragile — listings quality is the unlock for next $20K." Be insightful, not descriptive.]
 
-<b>⚠️ RISKS & OPPORTUNITIES</b><br>
-• [Risk 1 with $ exposure]<br>
-• [Opportunity 1 with $ upside]<br>
+<b>🎯 TOP-3 MOVES (next 7 days)</b><br>
+1. <b>[Action title]</b> — [Why it matters NOW + $ impact estimate + specific SKUs/numbers]<br>
+2. <b>[Action title]</b> — [Rationale with quantified impact]<br>
+3. <b>[Action title]</b> — [What to do + expected outcome]<br>
 
-<b>🔮 ONE THING TO WATCH</b><br>
-[The one metric or trend that matters most over next 30 days]
+<b>⚠️ MATERIAL RISKS</b><br>
+• <b>[Risk name]</b>: [$ exposure + probability + mitigation]<br>
+• <b>[Risk name]</b>: [Same format]<br>
 
-Be specific with numbers from data. Use $ amounts. Reference SKU codes where applicable. Maximum 200 words total."""
+<b>📈 UPSIDE LEVERS</b><br>
+• <b>[Lever]</b>: [$ upside if pulled + effort required (low/med/high)]<br>
+• <b>[Lever]</b>: [Same format]<br>
+
+<b>🔮 THE ONE METRIC</b><br>
+[Single KPI to obsess over next 30 days + why + threshold for action. E.g. "Returns-from-listings %. Threshold: if it crosses 60% by June, halt new SKU launches and run listing audit."]
+
+<b>📞 BOARD QUESTION</b><br>
+[One sharp question a board member would ask. Provoke thinking. E.g. "If WFS fees increase 15% next quarter (as Walmart signaled), what's our pivot — raise prices or reduce SKU count?"]
+
+REQUIREMENTS:
+• Cite EXACT $ amounts and SKU codes from data
+• Compare to benchmarks (e.g. "your margin 42% vs industry 35-50%, top quartile")
+• Use Pareto thinking (which 20% drives 80%)
+• Identify SECOND-ORDER effects (e.g. "fix listings → fewer returns → better seller rating → better BB win → more sales")
+• Never give generic advice ("improve marketing") — always specific actions
+• If data shows opportunity, quantify it. If shows risk, frame the bet.
+• Maximum 350 words total
+
+Be a top consultant. Write like Roger Martin or Michael Porter would. Sharp, contrarian if needed, always actionable."""
 
     import requests as req
     MODELS = [
@@ -2729,7 +2754,13 @@ Be specific with numbers from data. Use $ amounts. Reference SKU codes where app
     for model in MODELS:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            r = req.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=45)
+            r = req.post(url, json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.7,  # Трохи креативу для нестандартних інсайтів
+                    "maxOutputTokens": 1500,
+                }
+            }, timeout=60)
             result = r.json()
             if "error" in result:
                 continue
@@ -2748,28 +2779,51 @@ def render_overview(data, T, theme, lang):
     """Показує найважливіше з кожного розділу в одному вікні.
     Як виконавчий summary."""
 
-    # ============ 🧠 AI EXECUTIVE SUMMARY ============
+    # ============ 🧠 AI EXECUTIVE BRIEFING ============
     api_key = st.secrets.get("GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
     if api_key:
-        with st.spinner("🧠 AI analyzes your business state..."):
+        with st.spinner("🧠 Senior consultant analyzing your business..."):
             ai_summary, ai_model = ai_executive_summary(data, lang)
 
         if ai_summary:
             st.markdown(f"""
-            <div style="background: linear-gradient(135deg, rgba(151,117,250,0.12), rgba(124,159,255,0.08));
-                        border-left: 4px solid #9775fa; padding: 20px 24px; border-radius: 12px;
-                        margin: 8px 0 20px 0; line-height: 1.8;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <strong style="font-size:1.15rem;">🧠 AI Executive Briefing</strong>
-                    <span style="opacity:0.6; font-size:0.8rem;">Model: {ai_model}</span>
+            <div style="background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e3a8a 100%);
+                        border: 1px solid rgba(151,117,250,0.3);
+                        border-radius: 16px;
+                        padding: 28px 32px;
+                        margin: 8px 0 24px 0;
+                        line-height: 1.8;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+                        color: #f1f5f9;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;
+                            margin-bottom: 20px; padding-bottom: 16px;
+                            border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <div>
+                        <div style="font-size:0.75rem; opacity:0.7; letter-spacing:2px; text-transform:uppercase;">
+                            Strategic Briefing · Confidential
+                        </div>
+                        <div style="font-size:1.4rem; font-weight:600; margin-top:4px;">
+                            🎩 Partner-Level Analysis
+                        </div>
+                        <div style="font-size:0.85rem; opacity:0.7; margin-top:4px;">
+                            UDC Mower Parts · Walmart Marketplace · {datetime.now().strftime('%B %d, %Y')}
+                        </div>
+                    </div>
+                    <div style="font-size:0.7rem; opacity:0.5; text-align:right;">
+                        Generated by<br><b>{ai_model}</b>
+                    </div>
                 </div>
-                <div style="font-size:0.98rem;">{ai_summary}</div>
+                <div style="font-size:1rem; color:#e2e8f0;">{ai_summary}</div>
+                <div style="margin-top:20px; padding-top:14px; border-top: 1px solid rgba(255,255,255,0.1);
+                            font-size:0.75rem; opacity:0.5; font-style:italic;">
+                    💡 This briefing is auto-generated from live data. Cross-check actions with full dashboard before execution.
+                </div>
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.warning("⚠️ AI summary failed. Check GEMINI_API_KEY in Secrets.")
+            st.warning("⚠️ AI summary failed. Check GEMINI_API_KEY in Secrets or try refresh.")
     else:
-        st.info("💡 Add `GEMINI_API_KEY` to Streamlit Secrets to enable AI Executive Briefing")
+        st.info("💡 Add `GEMINI_API_KEY` to Streamlit Secrets to enable Partner-Level Briefing")
 
     st.divider()
 
@@ -2919,10 +2973,10 @@ def main():
             st.markdown("### 🏪 UDC Parts")
 
         st.divider()
-        lang = st.selectbox("🌐 Language / Мова / Язык", ["RU", "UA", "EN"], index=0, key="wm_lang")
+        lang = st.selectbox("🌐 Language / Мова / Язык", ["UA", "RU", "EN"], index=0, key="wm_lang")
         T = TRANSLATIONS[lang]
-        theme_name = st.radio(T["theme"], [T["dark"], T["light"]], horizontal=True, key="wm_theme")
-        theme = DARK_THEME if theme_name == T["dark"] else LIGHT_THEME
+        theme_name = st.radio(T["theme"], [T["light"], T["dark"]], horizontal=True, key="wm_theme")
+        theme = LIGHT_THEME if theme_name == T["light"] else DARK_THEME
 
         st.divider()
         if st.button(T["refresh"], use_container_width=True, key="wm_refresh"):
