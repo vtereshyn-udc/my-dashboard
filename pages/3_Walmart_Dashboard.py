@@ -1,15 +1,15 @@
 """
-Walmart Reports Dashboard v2.1
-ЗМІНИ vs v2.0:
-- ДОДАНО розділ 📦 Orders/Sales (walmart.orders)
-- Гнучкий пошук колонок (працює з будь-якою схемою таблиці orders)
+Walmart Reports Dashboard v3.0
+ЗМІНИ vs v2.1:
+- 🆕 КАТЕГОРІЇ в sidebar (💵 Sales, 📦 Ops, 🚨 Problems, 📋 Catalog, ⚙️ System, 🤖 AI)
+- 🆕 3 РЕЖИМИ ПЕРЕГЛЯДУ:
+  • 🎯 Overview — топ KPI з кожного розділу одним екраном (за замовчуванням)
+  • 🔍 Focus — один розділ повністю (вибір з dropdown)
+  • 📚 All — всі розділи разом з категоріями та чекбоксами
+- Кожна категорія в expander — можна згорнути/розгорнути
 
-v2.0:
-- ДОДАНО 3 розділи: WFS Shipments, Settlement, Customer Returns
-- McKinsey-level action items
-- Trilingual (RU/UA/EN), dark/light themes
-
-Drop into Streamlit `pages/` folder.
+v2.1: ДОДАНО 📦 Orders/Sales
+v2.0: ДОДАНО WFS Shipments, Settlement, Customer Returns
 """
 
 import streamlit as st
@@ -43,6 +43,21 @@ TRANSLATIONS = {
         "no_data": "⚠️ No data. Run loaders first.",
         "language": "🌐 Language",
         "theme": "🎨 Theme", "dark": "Dark", "light": "Light",
+
+        # 🆕 View modes
+        "view_mode": "📐 View mode",
+        "view_overview": "🎯 Overview (top of each)",
+        "view_focus": "🔍 Focus (pick one)",
+        "view_all": "📚 All sections",
+        "pick_section": "Select section",
+
+        # 🆕 Categories
+        "cat_sales": "💵 SALES & MONEY",
+        "cat_ops": "📦 OPERATIONS",
+        "cat_problems": "🚨 PROBLEMS & ACTIONS",
+        "cat_catalog": "📋 CATALOG",
+        "cat_system": "⚙️ SYSTEM",
+        "cat_ai": "🤖 AI",
 
         # KPI
         "total_skus": "Total SKUs",
@@ -180,6 +195,21 @@ TRANSLATIONS = {
         "language": "🌐 Мова",
         "theme": "🎨 Тема", "dark": "Темна", "light": "Світла",
 
+        # 🆕 View modes
+        "view_mode": "📐 Режим перегляду",
+        "view_overview": "🎯 Огляд (зведення)",
+        "view_focus": "🔍 Фокус (один розділ)",
+        "view_all": "📚 Все одразу",
+        "pick_section": "Оберіть розділ",
+
+        # 🆕 Categories
+        "cat_sales": "💵 ПРОДАЖІ ТА ГРОШІ",
+        "cat_ops": "📦 ОПЕРАЦІЇ",
+        "cat_problems": "🚨 ПРОБЛЕМИ ТА ДІЇ",
+        "cat_catalog": "📋 КАТАЛОГ",
+        "cat_system": "⚙️ СИСТЕМА",
+        "cat_ai": "🤖 AI",
+
         "total_skus": "Всього SKU", "gmv_30d": "GMV",
         "refunds_30d": "Повернення", "bb_win": "Buy Box Wins",
         "cap_skus": "CAP Discount SKU", "problems": "Проблемні SKU",
@@ -305,6 +335,21 @@ TRANSLATIONS = {
         "no_data": "⚠️ Нет данных. Запустите лодеры сначала.",
         "language": "🌐 Язык",
         "theme": "🎨 Тема", "dark": "Тёмная", "light": "Светлая",
+
+        # 🆕 View modes
+        "view_mode": "📐 Режим просмотра",
+        "view_overview": "🎯 Обзор (сводка)",
+        "view_focus": "🔍 Фокус (один раздел)",
+        "view_all": "📚 Всё сразу",
+        "pick_section": "Выберите раздел",
+
+        # 🆕 Categories
+        "cat_sales": "💵 ПРОДАЖИ И ДЕНЬГИ",
+        "cat_ops": "📦 ОПЕРАЦИИ",
+        "cat_problems": "🚨 ПРОБЛЕМЫ И ДЕЙСТВИЯ",
+        "cat_catalog": "📋 КАТАЛОГ",
+        "cat_system": "⚙️ СИСТЕМА",
+        "cat_ai": "🤖 AI",
 
         "total_skus": "Всего SKU", "gmv_30d": "GMV",
         "refunds_30d": "Возвраты", "bb_win": "Buy Box Win",
@@ -1757,7 +1802,144 @@ def render_ai_section(T, lang):
 
 
 # ============================================================
-# 🚀 MAIN
+# 🎯 OVERVIEW MODE — швидке зведення з всіх розділів
+# ============================================================
+
+def render_overview(data, T, theme, lang):
+    """Показує найважливіше з кожного розділу в одному вікні.
+    Як виконавчий summary."""
+
+    # ============ 💵 SALES & MONEY ============
+    st.markdown(f"### {T['cat_sales']}")
+
+    settle = data.get("settlement", pd.DataFrame())
+    orders = data.get("orders", pd.DataFrame())
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    # Settlement KPI
+    if not settle.empty:
+        payments = settle[settle["transaction_type"] == "PaymentSummary"]
+        net_paid = payments["total_payable"].sum() if not payments.empty else 0
+        sales_total = settle[settle["transaction_type"] == "Sale"]["amount"].sum()
+        c1.metric("💰 Net Paid (lifetime)", f"${float(net_paid):,.0f}")
+        c2.metric("📈 Gross Sales", f"${float(sales_total):,.0f}")
+
+    # Orders KPI
+    if not orders.empty:
+        date_col = _pick_col(orders, "order_date", "purchase_date", "created_at")
+        amount_col = _pick_col(orders, "total_amount", "order_total", "amount")
+        if date_col:
+            orders_df = orders.copy()
+            orders_df[date_col] = pd.to_datetime(orders_df[date_col], errors='coerce')
+            last30 = orders_df[orders_df[date_col] >= pd.Timestamp(datetime.now().date() - timedelta(days=30))]
+            c3.metric("📦 Orders 30d", f"{len(last30):,}")
+            if amount_col:
+                rev30 = pd.to_numeric(last30[amount_col], errors='coerce').sum()
+                c4.metric("💵 Revenue 30d", f"${float(rev30):,.0f}")
+
+    # Mini payouts timeline
+    if not settle.empty:
+        payments = settle[settle["transaction_type"] == "PaymentSummary"]
+        if not payments.empty:
+            ptime = payments[["report_date", "total_payable"]].copy()
+            ptime["report_date"] = pd.to_datetime(ptime["report_date"])
+            ptime = ptime.sort_values("report_date").tail(12)
+            ptime["color"] = ptime["total_payable"].apply(lambda x: "Deposit" if x > 0 else "Debit")
+            fig = px.bar(ptime, x="report_date", y="total_payable", color="color",
+                color_discrete_map={"Deposit": "#51cf66", "Debit": "#e03131"},
+                title="💰 Last 12 Payouts → PAYONEER")
+            fig.update_layout(height=250, template=theme["template"],
+                paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+                showlegend=False, margin=dict(l=0, r=0, t=40, b=0))
+            st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ============ 📦 OPERATIONS ============
+    st.markdown(f"### {T['cat_ops']}")
+
+    wfs = data.get("wfs_shipments", pd.DataFrame())
+    inv = data.get("inventory_new", pd.DataFrame())
+
+    c1, c2, c3, c4 = st.columns(4)
+    if not wfs.empty:
+        awaiting = wfs[wfs["po_status"] == "AWAITING_DELIVERY"]["shipment_id"].nunique()
+        awaiting_df = wfs[wfs["po_status"] == "AWAITING_DELIVERY"]
+        pending = int((awaiting_df["expected_units"].fillna(0) - awaiting_df["received_units"].fillna(0)).sum()) if not awaiting_df.empty else 0
+        c1.metric("🚛 In Transit", f"{awaiting} ships")
+        c2.metric("📦 Pending Units", f"{pending:,}")
+
+    if not inv.empty:
+        if "current_quantity" in inv:
+            total_stock = pd.to_numeric(inv["current_quantity"], errors='coerce').sum()
+            c3.metric("💾 In Stock", f"{int(total_stock):,} units")
+        if "available_quantity" in inv:
+            oos = (pd.to_numeric(inv["available_quantity"], errors='coerce') == 0).sum()
+            c4.metric("🔴 OOS SKUs", f"{int(oos)}")
+
+    # Найближчі поставки
+    if not wfs.empty:
+        upcoming = wfs[(wfs["po_status"] == "AWAITING_DELIVERY") & (wfs["expected_delivery_date"].notna())]
+        if not upcoming.empty:
+            upcoming_agg = upcoming.groupby("shipment_id").agg(
+                fc=("fc_name", "first"),
+                eta=("expected_delivery_date", "max"),
+                skus=("sku", "nunique"),
+                pending_u=("expected_units", lambda x: x.sum() - upcoming.loc[x.index, "received_units"].fillna(0).sum()),
+            ).reset_index().sort_values("eta").head(5)
+            upcoming_agg["eta"] = pd.to_datetime(upcoming_agg["eta"]).dt.strftime("%Y-%m-%d")
+            upcoming_agg["pending_u"] = upcoming_agg["pending_u"].astype(int)
+            upcoming_agg.columns = ["Shipment", "FC", "ETA", "SKUs", "Pending Units"]
+            st.markdown("**🚛 Next 5 deliveries:**")
+            st.dataframe(upcoming_agg, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ============ 🚨 PROBLEMS & ACTIONS ============
+    st.markdown(f"### {T['cat_problems']}")
+
+    ret = data.get("returns", pd.DataFrame())
+    items = data.get("items", pd.DataFrame())
+    buybox = data.get("buybox", pd.DataFrame())
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    if not ret.empty:
+        listing_issues = ["INCORRECT_ITEM", "DIFFICULT_TO_SETUP_NOT_COMPATIBLE", "NOT_AS_DESCRIBED_PICTURED"]
+        listing_cnt = ret[ret["return_reason"].isin(listing_issues)].shape[0] if "return_reason" in ret else 0
+        listing_pct = (100 * listing_cnt / max(len(ret), 1))
+        c1.metric("🔄 Returns total", f"{len(ret)}")
+        c2.metric("⚠️ Listing issues", f"{listing_pct:.0f}%")
+
+    if not items.empty and "publish_status" in items:
+        problems = (~items["publish_status"].isin(["PUBLISHED"])).sum()
+        c3.metric("📋 Unpublished SKU", f"{int(problems)}")
+
+    if not buybox.empty and "price_diff_pct" in buybox:
+        cap_heavy = (buybox["price_diff_pct"].fillna(0) > 0.20).sum()
+        c4.metric("💸 CAP >20%", f"{int(cap_heavy)} SKU")
+
+    # Топ action items (з health check)
+    actions = build_action_items(data, lang)
+    if actions:
+        st.markdown("**🎯 Top Action Items:**")
+        impact_key = f"impact_{lang.lower()}"
+        for act in actions[:3]:  # Тільки топ-3
+            cls = _severity_class(act["severity"])
+            impact = act.get(impact_key, act.get("impact_en", ""))
+            emoji = {"CRITICAL": "🔴", "WARNING": "🟡", "INFO": "🔵"}.get(act["severity"], "⚪")
+            st.markdown(f"""
+            <div class="{cls}">
+                <strong>{emoji} {act['issue']}</strong> · {T['affected']}: {act['count']}<br>
+                <span style="opacity:0.85;">{impact}</span><br>
+                <strong>→ {T['action']}:</strong> {act['action']}
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.divider()
+
+
 # ============================================================
 
 def main():
@@ -1782,28 +1964,74 @@ def main():
             st.rerun()
 
         st.divider()
-        st.markdown(f"### {T['sections']}")
 
-        # 🆕 Нові розділи на початку
-        show_orders = st.checkbox(T["orders_section"], True, key="wm_orders")
-        show_wfs = st.checkbox(T["wfs_section"], True, key="wm_wfs")
-        show_settle = st.checkbox(T["settlement_section"], True, key="wm_settle")
-        show_returns = st.checkbox(T["returns_section"], True, key="wm_returns")
-        st.markdown("---")
-        # Старі
-        show_health = st.checkbox(T["health_section"], True, key="wm_s1")
-        show_buybox = st.checkbox(T["buybox_section"], False, key="wm_s2")
-        show_perf = st.checkbox(T["performance_section"], False, key="wm_s3")
-        show_status = st.checkbox(T["status_section"], False, key="wm_s4")
-        show_cancel = st.checkbox(T["cancel_section"], False, key="wm_s5")
-        show_loader = st.checkbox(T["loader_section"], False, key="wm_s6")
-        st.markdown("---")
-        show_ai = st.checkbox(T["ai_section"], True, key="wm_s7")
+        # 🆕 РЕЖИМ ПЕРЕГЛЯДУ
+        st.markdown(f"### {T['view_mode']}")
+        view_mode = st.radio(
+            T["view_mode"],
+            [T["view_overview"], T["view_focus"], T["view_all"]],
+            label_visibility="collapsed",
+            key="wm_view_mode",
+        )
+
+        st.divider()
+
+        # 🆕 СПИСОК ВСІХ РОЗДІЛІВ (для focus / all)
+        # Структура: (category, key, title, render_fn)
+        SECTIONS = [
+            # 💵 SALES & MONEY
+            (T["cat_sales"], "orders",   T["orders_section"],       render_orders),
+            (T["cat_sales"], "settle",   T["settlement_section"],   render_settlement),
+
+            # 📦 OPERATIONS
+            (T["cat_ops"],   "wfs",      T["wfs_section"],          render_wfs_shipments),
+            (T["cat_ops"],   "returns",  T["returns_section"],      render_returns),
+            (T["cat_ops"],   "cancel",   T["cancel_section"],       render_cancellations),
+
+            # 🚨 PROBLEMS & ACTIONS
+            (T["cat_problems"], "health", T["health_section"],      lambda d, t, th: render_health_check(d, t, th, lang)),
+            (T["cat_problems"], "buybox", T["buybox_section"],      render_buybox),
+
+            # 📋 CATALOG
+            (T["cat_catalog"], "perf",   T["performance_section"],  render_performance),
+            (T["cat_catalog"], "status", T["status_section"],       render_item_status),
+
+            # ⚙️ SYSTEM
+            (T["cat_system"], "loader",  T["loader_section"],       render_loader_runs),
+        ]
+
+        # FOCUS режим — selectbox
+        focus_choice = None
+        if view_mode == T["view_focus"]:
+            options = [f"{cat} → {title}" for cat, _, title, _ in SECTIONS]
+            keys = [key for _, key, _, _ in SECTIONS]
+            focus_label = st.selectbox(T["pick_section"], options, key="wm_focus_pick")
+            focus_choice = keys[options.index(focus_label)]
+
+        # ALL режим — категорії з expander + checkboxes
+        all_enabled = {}
+        if view_mode == T["view_all"]:
+            st.markdown(f"### {T['sections']}")
+
+            # Групуємо по категоріях
+            from collections import defaultdict
+            cats = defaultdict(list)
+            for cat, key, title, fn in SECTIONS:
+                cats[cat].append((key, title, fn))
+
+            for cat_name, items_list in cats.items():
+                with st.expander(cat_name, expanded=True):
+                    for key, title, _ in items_list:
+                        all_enabled[key] = st.checkbox(title, True, key=f"wm_cb_{key}")
+
+        # AI завжди окремий
+        st.divider()
+        show_ai = st.checkbox(T["ai_section"], view_mode == T["view_all"], key="wm_s_ai")
 
     apply_theme(theme)
 
     st.markdown(f"## {T['title']}")
-    st.caption(f"`walmart.*` · {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    st.caption(f"`walmart.*` · {datetime.now().strftime('%d.%m.%Y %H:%M')}  ·  Mode: {view_mode}")
     st.divider()
 
     with st.spinner(T["loading"]):
@@ -1813,50 +2041,29 @@ def main():
         st.warning(T["no_data"])
         return
 
+    # KPI завжди показуємо
     kpi_row(data, T)
     st.divider()
 
-    # 🆕 НОВІ РОЗДІЛИ
-    if show_orders:
-        render_orders(data, T, theme)
-        st.divider()
+    # ============ РЕНДЕР ЗА РЕЖИМОМ ============
 
-    if show_wfs:
-        render_wfs_shipments(data, T, theme)
-        st.divider()
+    if view_mode == T["view_overview"]:
+        # 🎯 OVERVIEW — швидке зведення
+        render_overview(data, T, theme, lang)
 
-    if show_settle:
-        render_settlement(data, T, theme)
-        st.divider()
+    elif view_mode == T["view_focus"]:
+        # 🔍 FOCUS — один розділ повністю
+        for cat, key, title, fn in SECTIONS:
+            if key == focus_choice:
+                fn(data, T, theme)
+                break
 
-    if show_returns:
-        render_returns(data, T, theme)
-        st.divider()
-
-    # СТАРІ
-    if show_health:
-        render_health_check(data, T, theme, lang)
-        st.divider()
-
-    if show_buybox:
-        render_buybox(data, T, theme)
-        st.divider()
-
-    if show_perf:
-        render_performance(data, T, theme)
-        st.divider()
-
-    if show_status:
-        render_item_status(data, T, theme)
-        st.divider()
-
-    if show_cancel:
-        render_cancellations(data, T, theme)
-        st.divider()
-
-    if show_loader:
-        render_loader_runs(data, T, theme)
-        st.divider()
+    elif view_mode == T["view_all"]:
+        # 📚 ALL — всі вибрані розділи
+        for cat, key, title, fn in SECTIONS:
+            if all_enabled.get(key, False):
+                fn(data, T, theme)
+                st.divider()
 
     if show_ai:
         render_ai_section(T, lang)
