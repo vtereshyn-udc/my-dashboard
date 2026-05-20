@@ -2966,12 +2966,18 @@ def main():
             (T["cat_system"], "loader",  T["loader_section"],       render_loader_runs),
         ]
 
-        # FOCUS режим — selectbox
+        # FOCUS режим — radio buttons (повні назви, всі видно)
         focus_choice = None
         if view_mode == T["view_focus"]:
+            st.markdown(f"**{T['pick_section']}:**")
             options = [f"{cat} → {title}" for cat, _, title, _ in SECTIONS]
             keys = [key for _, key, _, _ in SECTIONS]
-            focus_label = st.selectbox(T["pick_section"], options, key="wm_focus_pick")
+            focus_label = st.radio(
+                T["pick_section"],
+                options,
+                label_visibility="collapsed",
+                key="wm_focus_pick",
+            )
             focus_choice = keys[options.index(focus_label)]
 
         # ALL режим — категорії з expander + checkboxes
@@ -3036,4 +3042,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
