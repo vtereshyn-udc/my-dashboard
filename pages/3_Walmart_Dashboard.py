@@ -683,6 +683,7 @@ def load_walmart_data():
     except Exception as e:
         st.error(f"❌ DB Error: {e}")
         return None
+    data["_engine"] = eng  # для додаткових queries (per-SKU storage breakdown)
     return data
 
 
@@ -961,6 +962,104 @@ def render_storage(data, T, theme):
         recent, use_container_width=True, hide_index=True, height=400,
         column_config={T["storage_amount"]: st.column_config.NumberColumn(format="$%.2f")},
     )
+
+    # ============ 7. PER-SKU BREAKDOWN з wfs_inventory_health ============
+    try:
+        engine = data.get("_engine")
+        if engine is not None:
+            wfs_sku = pd.read_sql(
+                """
+                SELECT sku, product_name, available_units, cube_used,
+                       ats_366_450 + ats_450_plus AS longterm_units,
+                       est_standard_monthly_fee, est_longterm_monthly_fee,
+                       est_total_monthly_fee, surplus_units,
+                       is_dead_stock, is_high_surplus,
+                       last_30_units_sales, sell_through_rate
+                FROM walmart.wfs_inventory_health
+                WHERE snapshot_date = (
+                    SELECT MAX(snapshot_date) FROM walmart.wfs_inventory_health
+                )
+                """,
+                engine
+            )
+        else:
+            wfs_sku = pd.DataFrame()
+    except Exception:
+        wfs_sku = pd.DataFrame()
+
+    if not wfs_sku.empty:
+        st.divider()
+        st.markdown("#### 🎯 Per-SKU Storage Breakdown")
+        st.caption("Розрахункові storage fees по кожному SKU + dead stock detection (з WFS API)")
+
+        # KPI
+        total_sku = len(wfs_sku)
+        dead_sku = int(wfs_sku["is_dead_stock"].sum())
+        surplus_sku = int(wfs_sku["is_high_surplus"].sum())
+        est_total = wfs_sku["est_total_monthly_fee"].sum()
+        est_lt = wfs_sku["est_longterm_monthly_fee"].sum()
+        total_units = int(wfs_sku["available_units"].sum())
+        surplus_units = int(wfs_sku["surplus_units"].sum())
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("📦 SKU в WFS", f"{total_sku}")
+        c2.metric("💀 Dead stock SKU", f"{dead_sku}")
+        c3.metric("📊 Available units", f"{total_units:,}")
+        c4.metric("💰 Est. storage/міс", f"${est_total:,.0f}")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("⚠️ Surplus SKU", f"{surplus_sku}")
+        c2.metric("📦 Surplus units", f"{surplus_units:,}")
+        c3.metric("💸 LongTerm/міс", f"${est_lt:,.0f}")
+        c4.metric("🎯 Year recovery", f"${est_lt * 12:,.0f}")
+
+        # TOP-15 killers
+        st.markdown("##### 🏆 TOP-15 Storage Killers")
+        killers = wfs_sku.sort_values("est_total_monthly_fee", ascending=False).head(15).copy()
+        killers["product_short"] = killers["product_name"].astype(str).str[:45]
+
+        fig = px.bar(
+            killers.sort_values("est_total_monthly_fee"),
+            x="est_total_monthly_fee", y="sku", orientation="h",
+            color="longterm_units", color_continuous_scale="Reds",
+            hover_data={"product_short": True, "available_units": True, "longterm_units": True},
+            text="est_total_monthly_fee",
+        )
+        fig.update_traces(texttemplate="$%{text:,.0f}/mo", textposition="outside")
+        fig.update_layout(
+            height=500, template=theme["template"],
+            paper_bgcolor=theme["paper_bg"], plot_bgcolor=theme["plot_bg"],
+            showlegend=False,
+            margin=dict(l=0, r=60, t=20, b=0), yaxis_title="",
+            coloraxis_colorbar=dict(title="LT units"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Dead stock table
+        dead_stock = wfs_sku[wfs_sku["is_dead_stock"]].sort_values("est_longterm_monthly_fee", ascending=False)
+        if not dead_stock.empty:
+            st.markdown(f"##### 💀 Dead Stock SKU ({len(dead_stock)}) — потенціал економії ${dead_stock['est_longterm_monthly_fee'].sum() * 12:,.0f}/рік")
+            dead_display = dead_stock[[
+                "sku", "product_name", "available_units", "longterm_units",
+                "est_longterm_monthly_fee", "last_30_units_sales", "sell_through_rate"
+            ]].copy()
+            dead_display["product_name"] = dead_display["product_name"].astype(str).str[:50]
+            dead_display = dead_display.rename(columns={
+                "sku": "SKU",
+                "product_name": "Назва",
+                "available_units": "Units",
+                "longterm_units": "LT Units",
+                "est_longterm_monthly_fee": "$/mo lost",
+                "last_30_units_sales": "30d sales",
+                "sell_through_rate": "ST rate",
+            })
+            st.dataframe(
+                dead_display, use_container_width=True, hide_index=True, height=400,
+                column_config={
+                    "$/mo lost": st.column_config.NumberColumn(format="$%.2f"),
+                    "ST rate": st.column_config.NumberColumn(format="%.3f"),
+                },
+            )
 
 
 # ============================================================
