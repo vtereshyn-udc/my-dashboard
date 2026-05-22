@@ -672,6 +672,18 @@ def load_walmart_data():
         "settlement":      "SELECT * FROM walmart.settlement",
         "returns":         "SELECT * FROM walmart.returns",
         "orders":          "SELECT * FROM walmart.orders WHERE order_date::timestamp >= CURRENT_DATE - INTERVAL '180 days'",
+        "wfs_inventory_health": """
+            SELECT sku, product_name, available_units, cube_used,
+                   ats_366_450 + ats_450_plus AS longterm_units,
+                   est_standard_monthly_fee, est_longterm_monthly_fee,
+                   est_total_monthly_fee, surplus_units,
+                   is_dead_stock, is_high_surplus,
+                   last_30_units_sales, sell_through_rate
+            FROM walmart.wfs_inventory_health
+            WHERE snapshot_date = (
+                SELECT MAX(snapshot_date) FROM walmart.wfs_inventory_health
+            )
+        """,
     }
     try:
         with eng.connect() as conn:
@@ -683,7 +695,6 @@ def load_walmart_data():
     except Exception as e:
         st.error(f"❌ DB Error: {e}")
         return None
-    data["_engine"] = eng  # для додаткових queries (per-SKU storage breakdown)
     return data
 
 
@@ -964,28 +975,7 @@ def render_storage(data, T, theme):
     )
 
     # ============ 7. PER-SKU BREAKDOWN з wfs_inventory_health ============
-    try:
-        engine = data.get("_engine")
-        if engine is not None:
-            wfs_sku = pd.read_sql(
-                """
-                SELECT sku, product_name, available_units, cube_used,
-                       ats_366_450 + ats_450_plus AS longterm_units,
-                       est_standard_monthly_fee, est_longterm_monthly_fee,
-                       est_total_monthly_fee, surplus_units,
-                       is_dead_stock, is_high_surplus,
-                       last_30_units_sales, sell_through_rate
-                FROM walmart.wfs_inventory_health
-                WHERE snapshot_date = (
-                    SELECT MAX(snapshot_date) FROM walmart.wfs_inventory_health
-                )
-                """,
-                engine
-            )
-        else:
-            wfs_sku = pd.DataFrame()
-    except Exception:
-        wfs_sku = pd.DataFrame()
+    wfs_sku = data.get("wfs_inventory_health", pd.DataFrame())
 
     if not wfs_sku.empty:
         st.divider()
@@ -3617,4 +3607,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
