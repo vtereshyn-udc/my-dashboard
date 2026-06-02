@@ -14,6 +14,7 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+from review_request_page import render_review_page, REVIEW_TRANSLATIONS
 
 st.set_page_config(
     page_title="Sales & Traffic Dashboard",
@@ -754,6 +755,12 @@ def main():
         st.divider()
         lang = st.selectbox("🌐 Language / Мова / Язык", ["RU","UA","EN"], index=0)
         T = TRANSLATIONS[lang]
+        page = st.radio(
+            REVIEW_TRANSLATIONS[lang]["nav_label"],
+            [REVIEW_TRANSLATIONS[lang]["nav_sales"],
+             REVIEW_TRANSLATIONS[lang]["nav_review"]],
+            horizontal=False,
+        )
         theme_name = st.radio(T['theme'], [T['dark'], T['light']], horizontal=True)
         theme = DARK_THEME if theme_name == T['dark'] else LIGHT_THEME
         st.divider()
@@ -775,6 +782,10 @@ def main():
         show_table   = st.checkbox(T['table'], False)
 
     apply_theme(theme)
+
+    if page == REVIEW_TRANSLATIONS[lang]["nav_review"]:
+        render_review_page(get_engine, T, theme, lang)
+        return
 
     st.markdown(f"## {T['title']}")
     st.caption(f"`{TABLE}` · {datetime.now().strftime('%d.%m.%Y %H:%M')}")
