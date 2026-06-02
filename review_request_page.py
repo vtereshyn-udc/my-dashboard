@@ -4,10 +4,9 @@ review_request_page.py — сторінка "Review Request" для існуюч
 Підключення в твоєму головному файлі (Sales & Traffic Dashboard v1.3):
 
   1. Зверху додай імпорт:
-
         from review_request_page import render_review_page, REVIEW_TRANSLATIONS
 
-  2. У main(), у блоці with st.sidebar: ПІСЛЯ вибору мови (lang) додай перемикач сторінок:
+  2. У main(), у блоці `with st.sidebar:` ПІСЛЯ вибору мови (lang) додай перемикач сторінок:
 
         page = st.radio(
             REVIEW_TRANSLATIONS[lang]["nav_label"],
@@ -27,17 +26,11 @@ review_request_page.py — сторінка "Review Request" для існуюч
 Все. get_engine, T, theme, lang беруться з твого існуючого коду — нічого не дублюється.
 
 ВАЖЛИВО про схему: цей модуль читає
-
   - public.review_request_log (amazon_order_id, sent_at, status)
-
   - spapi.all_orders (amazon_order_id, order_status, purchase_date)
-
 Фільтри returns/refunds/replacements у підрахунку пулу свідомо НЕ застосовані
-
 для швидкості (це оглядовий монітор). Якщо треба точно як у sender —
-
 розкоментуй блок EXCLUDE_FILTERS_SQL нижче.
-
 """
 
 import streamlit as st
@@ -46,6 +39,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from sqlalchemy import text
 from datetime import datetime
+
 
 # ============================================================
 # 🌐 ПЕРЕКЛАДИ (доповнюють твій TRANSLATIONS)
@@ -67,6 +61,7 @@ REVIEW_TRANSLATIONS = {
         "health_ok": "✅ Healthy — last run within 25h",
         "health_warn": "🚨 NO SEND for {h:.0f}h (threshold 25h)",
         "daily_title": "📈 Daily volume (by status)",
+        "legend_hint": "💡 <b>Sent</b> — Amazon accepted the request · <b>Already</b> — request was already sent for this order earlier (Amazon declined the duplicate, this is normal) · <b>Outside</b> — order is outside the 5-30 day window (will retry later) · <b>Failed</b> — technical error (e.g. expired token); these orders return to the pool and get retried next run.",
         "pool_title": "🎯 Candidate pool by urgency",
         "pool_fresh": "Fresh (8-15d)",
         "pool_mid": "Mid (15-25d)",
@@ -96,6 +91,7 @@ REVIEW_TRANSLATIONS = {
         "health_ok": "✅ Здорово — останній прогін у межах 25 год",
         "health_warn": "🚨 НЕМАЄ РОЗСИЛКИ {h:.0f} год (поріг 25 год)",
         "daily_title": "📈 Обсяг по днях (за статусом)",
+        "legend_hint": "💡 <b>Надіслано</b> — Amazon прийняв запит · <b>Already</b> — запит по цьому замовленню вже слали раніше (Amazon відмовив у дублі, це нормально) · <b>Outside</b> — замовлення поза вікном 5-30 днів (повторимо пізніше) · <b>Помилок</b> — технічна помилка (напр. протух токен); ці замовлення повертаються в пул і повторюються наступного прогону.",
         "pool_title": "🎯 Пул кандидатів за терміновістю",
         "pool_fresh": "Свіжі (8-15д)",
         "pool_mid": "Середні (15-25д)",
@@ -125,6 +121,7 @@ REVIEW_TRANSLATIONS = {
         "health_ok": "✅ Здорово — последний прогон в пределах 25ч",
         "health_warn": "🚨 НЕТ РАССЫЛКИ {h:.0f}ч (порог 25ч)",
         "daily_title": "📈 Объём по дням (по статусу)",
+        "legend_hint": "💡 <b>Отправлено</b> — Amazon принял запрос · <b>Already</b> — запрос по этому заказу уже отправляли ранее (Amazon отклонил дубль, это нормально) · <b>Outside</b> — заказ вне окна 5-30 дней (повторим позже) · <b>Ошибок</b> — техническая ошибка (напр. истёк токен); эти заказы возвращаются в пул и повторяются в следующем прогоне.",
         "pool_title": "🎯 Пул кандидатов по срочности",
         "pool_fresh": "Свежие (8-15д)",
         "pool_mid": "Средние (15-25д)",
@@ -141,12 +138,13 @@ REVIEW_TRANSLATIONS = {
     },
 }
 
+
 # ============================================================
 # 🗄️ ЗАПИТИ ДО БД (кешовані)
 # ============================================================
 
 @st.cache_data(ttl=900)
-def loaddaily(_engine, days_back: int = 30) -> pd.DataFrame:
+def _load_daily(_engine, days_back: int = 30) -> pd.DataFrame:
     """Розсилка по днях за статусом."""
     q = text("""
         SELECT sent_at::date AS day,
@@ -168,10 +166,11 @@ def loaddaily(_engine, days_back: int = 30) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=900)
-def loadkpis(_engine) -> dict:
+def _load_kpis(_engine) -> dict:
     """Зведені KPI одним проходом."""
     out = {}
     with _engine.connect() as conn:
+        # надіслано сьогодні / 7д / помилок 7д / останній sent
         row = conn.execute(text("""
             SELECT
               COUNT(*) FILTER (WHERE status='sent' AND sent_at::date=CURRENT_DATE)        AS today,
@@ -184,6 +183,8 @@ def loadkpis(_engine) -> dict:
         out['sent7']     = row[1] or 0
         out['failed7']   = row[2] or 0
         out['last_sent'] = row[3]
+
+        # годин з останньої відправки (для health)
         if out['last_sent']:
             h = conn.execute(text(
                 "SELECT EXTRACT(EPOCH FROM (NOW() - :ts))/3600"
@@ -195,8 +196,10 @@ def loadkpis(_engine) -> dict:
 
 
 @st.cache_data(ttl=900)
-def loadpool(_engine) -> dict:
+def _load_pool(_engine) -> dict:
     """Пул кандидатів за терміновістю + воронка."""
+    # ❗ Спрощено: НЕ застосовуємо returns/refunds/replacements фільтри (оглядовий монітор).
+    #   Точність пулу тут ~на рівні ±кілька % проти реального sender.
     base = """
         FROM spapi.all_orders o
         WHERE o.order_status = 'Shipped'
@@ -212,22 +215,25 @@ def loadpool(_engine) -> dict:
     with _engine.connect() as conn:
         row = conn.execute(text(f"""
             SELECT
-              COUNT(*) FILTER (WHERE purchase_date >= NOW()-INTERVAL '15 days')  AS fresh,
+              COUNT(*) FILTER (WHERE purchase_date >= NOW()-INTERVAL '15 days')                                AS fresh,
               COUNT(*) FILTER (WHERE purchase_date <  NOW()-INTERVAL '15 days'
-                                 AND purchase_date >= NOW()-INTERVAL '25 days')  AS mid,
-              COUNT(*) FILTER (WHERE purchase_date <  NOW()-INTERVAL '25 days')  AS burning,
-              COUNT(*)                                                            AS pool
+                                 AND purchase_date >= NOW()-INTERVAL '25 days')                                 AS mid,
+              COUNT(*) FILTER (WHERE purchase_date <  NOW()-INTERVAL '25 days')                                 AS burning,
+              COUNT(*)                                                                                          AS pool
             {base}
         """)).fetchone()
         out['fresh']   = row[0] or 0
         out['mid']     = row[1] or 0
         out['burning'] = row[2] or 0
         out['pool']    = row[3] or 0
+
+        # воронка: всі Shipped 30д
         out['orders30'] = conn.execute(text("""
             SELECT COUNT(*) FROM spapi.all_orders
             WHERE order_status='Shipped'
               AND purchase_date >= NOW()-INTERVAL '30 days'
         """)).scalar() or 0
+
         out['sent30'] = conn.execute(text("""
             SELECT COUNT(*) FROM public.review_request_log
             WHERE status='sent' AND sent_at >= NOW()-INTERVAL '30 days'
@@ -254,15 +260,15 @@ def render_review_page(get_engine, T_main, theme, lang):
     st.divider()
 
     with st.spinner(R['loading']):
-        kpi  = loadkpis(engine)
-        pool = loadpool(engine)
-        daily = loaddaily(engine, 30)
+        kpi  = _load_kpis(engine)
+        pool = _load_pool(engine)
+        daily = _load_daily(engine, 30)
 
     if daily.empty and pool['pool'] == 0:
         st.warning(R['no_data'])
         return
 
-    # ---- HEALTH BANNER ----
+    # ---- HEALTH BANNER (dead man's switch, візуальний) ----
     hrs = kpi.get('hours_since')
     if hrs is not None and hrs > 25:
         st.error(R['health_warn'].format(h=hrs))
@@ -281,10 +287,12 @@ def render_review_page(get_engine, T_main, theme, lang):
               delta_color="inverse")
     last_str = kpi['last_sent'].strftime('%d.%m %H:%M') if kpi['last_sent'] else "—"
     c6.metric(R['kpi_last'], last_str)
+
     st.divider()
 
     # ---- DAILY VOLUME (stacked bars) ----
     st.markdown(f"### {R['daily_title']}")
+    st.caption(R['legend_hint'], unsafe_allow_html=True)
     if not daily.empty:
         fig = go.Figure()
         fig.add_trace(go.Bar(name=R['col_sent'], x=daily['day'], y=daily['sent'],
