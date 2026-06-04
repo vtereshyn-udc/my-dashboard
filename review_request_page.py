@@ -87,10 +87,10 @@ REVIEW_TRANSLATIONS = {
         "per_label": "Period", "per_7": "7 days", "per_14": "14 days", "per_30": "30 days",
         "sum_sent": "✅ Sent", "sum_already": "⏭️ Already", "sum_outside": "⏰ Outside",
         "sum_failed": "❌ Failed", "sum_asins": "📦 ASINs active",
-        "risk_title": "🛡️ Sending vs negative trend (safety signal)",
-        "risk_sub": "Negative-topic share per ASIN (from Customer Feedback). If negativity is rising — better not to push review requests for that ASIN (you'd be inviting unhappy buyers).",
-        "risk_flag": "Flag", "risk_now": "Neg now", "risk_prev": "Neg prev", "risk_delta": "Δ",
-        "risk_warn": "🔴 {n} ASIN(s) with rising negativity — consider pausing requests for them.",
+        "risk_title": "🛡️ Sending vs top negative topic (safety signal)",
+        "risk_sub": "The #1 negative topic per ASIN (from Customer Feedback) and how much it drags the rating. If a topic hurts the rating a lot — better not to push review requests for that ASIN.",
+        "risk_flag": "Flag", "risk_topic": "Top negative topic", "risk_pct": "Mentions", "risk_impact": "★ impact",
+        "risk_warn": "🔴 {n} ASIN(s) with a strongly rating-damaging topic — consider pausing requests for them.",
     },
     "UA": {
         "nav_label": "🧭 Сторінка",
@@ -130,10 +130,10 @@ REVIEW_TRANSLATIONS = {
         "per_label": "Період", "per_7": "7 днів", "per_14": "14 днів", "per_30": "30 днів",
         "sum_sent": "✅ Надіслано", "sum_already": "⏭️ Already", "sum_outside": "⏰ Outside",
         "sum_failed": "❌ Помилок", "sum_asins": "📦 Активних ASIN",
-        "risk_title": "🛡️ Розсилка vs тренд негативу (захисний сигнал)",
-        "risk_sub": "Частка негативних тем по ASIN (з Customer Feedback). Якщо негатив росте — краще НЕ гнати запити на відгук по цьому ASIN (бо кличеш незадоволених покупців).",
-        "risk_flag": "Прапор", "risk_now": "Негатив зараз", "risk_prev": "Негатив до", "risk_delta": "Δ",
-        "risk_warn": "🔴 {n} ASIN з ростом негативу — варто призупинити запити по них.",
+        "risk_title": "🛡️ Розсилка vs топова негативна тема (захисний сигнал)",
+        "risk_sub": "Головна негативна тема по ASIN (з Customer Feedback) і наскільки вона тягне рейтинг вниз. Якщо тема сильно шкодить рейтингу — краще НЕ гнати запити по цьому ASIN.",
+        "risk_flag": "Прапор", "risk_topic": "Топ негативна тема", "risk_pct": "Згадувань", "risk_impact": "★ вплив",
+        "risk_warn": "🔴 {n} ASIN із темою, що сильно псує рейтинг — варто призупинити запити по них.",
     },
     "RU": {
         "nav_label": "🧭 Страница",
@@ -173,10 +173,10 @@ REVIEW_TRANSLATIONS = {
         "per_label": "Период", "per_7": "7 дней", "per_14": "14 дней", "per_30": "30 дней",
         "sum_sent": "✅ Отправлено", "sum_already": "⏭️ Already", "sum_outside": "⏰ Outside",
         "sum_failed": "❌ Ошибок", "sum_asins": "📦 Активных ASIN",
-        "risk_title": "🛡️ Рассылка vs тренд негатива (защитный сигнал)",
-        "risk_sub": "Доля негативных тем по ASIN (из Customer Feedback). Если негатив растёт — лучше НЕ слать запросы на отзыв по этому ASIN (зовёшь недовольных покупателей).",
-        "risk_flag": "Флаг", "risk_now": "Негатив сейчас", "risk_prev": "Негатив до", "risk_delta": "Δ",
-        "risk_warn": "🔴 {n} ASIN с ростом негатива — стоит приостановить запросы по ним.",
+        "risk_title": "🛡️ Рассылка vs топовая негативная тема (защитный сигнал)",
+        "risk_sub": "Главная негативная тема по ASIN (из Customer Feedback) и насколько она тянет рейтинг вниз. Если тема сильно вредит рейтингу — лучше НЕ слать запросы по этому ASIN.",
+        "risk_flag": "Флаг", "risk_topic": "Топ негативная тема", "risk_pct": "Упоминаний", "risk_impact": "★ влияние",
+        "risk_warn": "🔴 {n} ASIN с темой, сильно портящей рейтинг — стоит приостановить запросы по ним.",
     },
 }
 
@@ -309,55 +309,45 @@ def _load_by_asin(_engine, days_back: int = 30) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=900)
-def _load_negative_trend(_engine) -> pd.DataFrame:
+def _load_top_negative(_engine) -> pd.DataFrame:
     """
-    🆕 Захисний сигнал: динаміка частки НЕГАТИВНИХ тем по ASIN.
-    Customer Feedback API не дає кількості відгуків/рейтингу — лише
-    occurrence_pct тем. Беремо найгіршу (max) частку негативу по ASIN
-    на ДВОХ останніх знімках (snapshot_date) і рахуємо дельту.
+    🆕 Топова НЕГАТИВНА тема по кожному ASIN (останній знімок).
+    Customer Feedback API не дає кількості відгуків/рейтингу — лише теми.
+    Беремо найвпливовішу негативну тему: topic_rank=1 (вона ж найчастіша),
+    + star impact (на скільки ★ тягне вниз) + % згадувань.
 
-    delta > 0  → негатив РОСТЕ  → НЕ варто гнати розсилку по цьому ASIN
-    delta < 0  → негатив падає  → можна слати
-
-    Джерело: reviews.item_trends (sentiment='negative').
+    Джерело: reviews.item_topics (sentiment='negative').
+    star_impact зазвичай ВІДʼЄМНИЙ (тягне рейтинг вниз) → беремо найменший (MIN).
     """
     q = text("""
-        WITH snaps AS (
-            SELECT DISTINCT snapshot_date
-            FROM reviews.item_trends
-            ORDER BY snapshot_date DESC
-            LIMIT 2
+        WITH last_snap AS (
+            SELECT MAX(snapshot_date) AS d FROM reviews.item_topics
         ),
-        ranked AS (
-            SELECT snapshot_date,
-                   ROW_NUMBER() OVER (ORDER BY snapshot_date DESC) AS rn
-            FROM snaps
-        ),
-        agg AS (
+        neg AS (
             SELECT t.asin,
-                   r.rn,
-                   MAX(t.asin_occurrence_pct) AS neg_pct
-            FROM reviews.item_trends t
-            JOIN ranked r ON r.snapshot_date = t.snapshot_date
-            WHERE t.sentiment = 'negative'
-              AND t.asin_occurrence_pct IS NOT NULL
-            GROUP BY t.asin, r.rn
+                   t.topic,
+                   t.asin_occurrence_pct,
+                   t.parent_star_impact,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY t.asin
+                       ORDER BY t.parent_star_impact ASC NULLS LAST, t.topic_rank ASC
+                   ) AS rn
+            FROM reviews.item_topics t, last_snap s
+            WHERE t.snapshot_date = s.d
+              AND t.sentiment = 'negative'
         )
-        SELECT
-            cur.asin                              AS asin,
-            cur.neg_pct                           AS neg_now,
-            prev.neg_pct                          AS neg_prev,
-            (cur.neg_pct - COALESCE(prev.neg_pct, cur.neg_pct)) AS neg_delta
-        FROM agg cur
-        LEFT JOIN agg prev ON prev.asin = cur.asin AND prev.rn = 2
-        WHERE cur.rn = 1
+        SELECT asin,
+               topic                AS top_topic,
+               asin_occurrence_pct  AS topic_pct,
+               parent_star_impact   AS star_impact
+        FROM neg
+        WHERE rn = 1
     """)
     try:
         with _engine.connect() as conn:
             df = pd.read_sql(q, conn)
     except Exception:
-        # таблиці reviews.item_trends може не бути / порожня — не валимо сторінку
-        df = pd.DataFrame(columns=["asin", "neg_now", "neg_prev", "neg_delta"])
+        df = pd.DataFrame(columns=["asin", "top_topic", "topic_pct", "star_impact"])
     return df
 
 
@@ -541,8 +531,8 @@ def render_review_page(get_engine, T_main, theme, lang):
                 },
             )
 
-        # ---- 🆕 ЗАХИСНИЙ СИГНАЛ: розсилка vs тренд негативу ----
-        neg = _load_negative_trend(engine)
+        # ---- 🆕 ЗАХИСНИЙ СИГНАЛ: розсилка vs топова негативна тема ----
+        neg = _load_top_negative(engine)
         if not neg.empty and not by_asin.empty:
             st.markdown(f"#### {R['risk_title']}")
             st.caption(R['risk_sub'])
@@ -551,39 +541,41 @@ def render_review_page(get_engine, T_main, theme, lang):
             risk = risk[risk['sent'] > 0].copy()
 
             if not risk.empty:
-                def _flag(d):
-                    if d is None:
-                        return "—"
-                    if d > 2:   return "🔴"   # негатив помітно росте
-                    if d > 0:   return "🟡"   # трохи росте
-                    return "🟢"               # падає / стабільно
-                risk['flag'] = risk['neg_delta'].apply(_flag)
-                risk = risk.sort_values('neg_delta', ascending=False)
+                def _flag(impact):
+                    # star_impact відʼємний → що менший, то сильніше тягне рейтинг вниз
+                    if impact is None:
+                        return "⚪"
+                    if impact <= -0.3:  return "🔴"   # сильно тягне вниз
+                    if impact <= -0.1:  return "🟡"   # помітно
+                    return "🟢"                        # слабкий вплив
+                risk['flag'] = risk['star_impact'].apply(_flag)
+                # сортуємо: спершу найшкідливіші теми (найменший star_impact)
+                risk = risk.sort_values('star_impact', ascending=True, na_position='last')
 
-                rt = risk[['flag', 'asin', 'sent', 'neg_now', 'neg_prev', 'neg_delta']].copy()
+                rt = risk[['flag', 'asin', 'sent', 'top_topic', 'topic_pct', 'star_impact']].copy()
                 rt['url'] = "https://www.amazon.com/dp/" + rt['asin'].astype(str)
                 rt = rt.rename(columns={
-                    'flag':      R['risk_flag'],
-                    'asin':      R['col_asin'],
-                    'sent':      R['col_sent'],
-                    'neg_now':   R['risk_now'],
-                    'neg_prev':  R['risk_prev'],
-                    'neg_delta': R['risk_delta'],
+                    'flag':       R['risk_flag'],
+                    'asin':       R['col_asin'],
+                    'sent':       R['col_sent'],
+                    'top_topic':  R['risk_topic'],
+                    'topic_pct':  R['risk_pct'],
+                    'star_impact': R['risk_impact'],
                 })
                 st.dataframe(
                     rt,
                     use_container_width=True,
-                    height=max(240, 36 * min(len(rt), 10)),
+                    height=max(240, 36 * min(len(rt), 12)),
                     hide_index=True,
                     column_config={
-                        R['risk_now']:   st.column_config.NumberColumn(format="%.1f%%"),
-                        R['risk_prev']:  st.column_config.NumberColumn(format="%.1f%%"),
-                        R['risk_delta']: st.column_config.NumberColumn(format="%+.1f pp"),
+                        R['risk_pct']:    st.column_config.NumberColumn(format="%.0f%%"),
+                        R['risk_impact']: st.column_config.NumberColumn(format="%.2f ★"),
                         "url": st.column_config.LinkColumn(R['col_link'], display_text="🔗"),
                         R['col_asin']: st.column_config.TextColumn(R['col_asin']),
+                        R['risk_topic']: st.column_config.TextColumn(R['risk_topic'], width="medium"),
                     },
                 )
-                n_red = int((risk['neg_delta'] > 2).sum())
+                n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
                     st.warning(R['risk_warn'].format(n=n_red))
 
