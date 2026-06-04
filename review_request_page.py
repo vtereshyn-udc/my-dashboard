@@ -1,6 +1,9 @@
 """
 review_request_page.py — сторінка "Review Request" для існуючого дашборда.
 
+v1.1 — додано блок "По ASIN": які товари і скільки запитів по них пішло,
+        з клікабельними ASIN-посиланнями на Amazon + бар-чарт топ-ASIN.
+
 Підключення в твоєму головному файлі (Sales & Traffic Dashboard v1.3):
 
   1. Зверху додай імпорт:
@@ -27,10 +30,10 @@ review_request_page.py — сторінка "Review Request" для існуюч
 
 ВАЖЛИВО про схему: цей модуль читає
   - public.review_request_log (amazon_order_id, sent_at, status)
-  - spapi.all_orders (amazon_order_id, order_status, purchase_date)
+  - spapi.all_orders (amazon_order_id, asin, order_status, purchase_date)
+ASIN у review_request_log НЕ зберігається → тягнемо JOIN-ом з all_orders.
 Фільтри returns/refunds/replacements у підрахунку пулу свідомо НЕ застосовані
-для швидкості (це оглядовий монітор). Якщо треба точно як у sender —
-розкоментуй блок EXCLUDE_FILTERS_SQL нижче.
+для швидкості (це оглядовий монітор).
 """
 
 import streamlit as st
@@ -75,6 +78,15 @@ REVIEW_TRANSLATIONS = {
         "col_day": "Day", "col_sent": "Sent", "col_already": "Already",
         "col_outside": "Outside", "col_failed": "Failed", "col_total": "Total",
         "loading": "Loading review data...",
+        # 🆕 ASIN block
+        "asin_title": "📦 By ASIN",
+        "asin_sub": "Which products review requests were sent for. Click ASIN to open on Amazon.",
+        "asin_chart_title": "🏆 Top ASIN by sent requests",
+        "asin_table_title": "📋 ASIN breakdown",
+        "col_asin": "ASIN", "col_link": "Link", "asin_no_data": "⚠️ No ASIN data (no log↔orders match).",
+        "per_label": "Period", "per_7": "7 days", "per_14": "14 days", "per_30": "30 days",
+        "sum_sent": "✅ Sent", "sum_already": "⏭️ Already", "sum_outside": "⏰ Outside",
+        "sum_failed": "❌ Failed", "sum_asins": "📦 ASINs active",
     },
     "UA": {
         "nav_label": "🧭 Сторінка",
@@ -105,6 +117,15 @@ REVIEW_TRANSLATIONS = {
         "col_day": "День", "col_sent": "Надіслано", "col_already": "Already",
         "col_outside": "Outside", "col_failed": "Помилок", "col_total": "Всього",
         "loading": "Завантажуємо дані розсилки...",
+        # 🆕 ASIN block
+        "asin_title": "📦 По ASIN",
+        "asin_sub": "По яких товарах слали запити на відгук. Клікни ASIN — відкриється на Amazon.",
+        "asin_chart_title": "🏆 Топ ASIN за надісланими запитами",
+        "asin_table_title": "📋 Розбивка по ASIN",
+        "col_asin": "ASIN", "col_link": "Посилання", "asin_no_data": "⚠️ Немає даних по ASIN (немає звʼязку log↔orders).",
+        "per_label": "Період", "per_7": "7 днів", "per_14": "14 днів", "per_30": "30 днів",
+        "sum_sent": "✅ Надіслано", "sum_already": "⏭️ Already", "sum_outside": "⏰ Outside",
+        "sum_failed": "❌ Помилок", "sum_asins": "📦 Активних ASIN",
     },
     "RU": {
         "nav_label": "🧭 Страница",
@@ -135,6 +156,15 @@ REVIEW_TRANSLATIONS = {
         "col_day": "День", "col_sent": "Отправлено", "col_already": "Already",
         "col_outside": "Outside", "col_failed": "Ошибок", "col_total": "Всего",
         "loading": "Загружаем данные рассылки...",
+        # 🆕 ASIN block
+        "asin_title": "📦 По ASIN",
+        "asin_sub": "По каким товарам слали запросы на отзыв. Кликни ASIN — откроется на Amazon.",
+        "asin_chart_title": "🏆 Топ ASIN по отправленным запросам",
+        "asin_table_title": "📋 Разбивка по ASIN",
+        "col_asin": "ASIN", "col_link": "Ссылка", "asin_no_data": "⚠️ Нет данных по ASIN (нет связи log↔orders).",
+        "per_label": "Период", "per_7": "7 дней", "per_14": "14 дней", "per_30": "30 дней",
+        "sum_sent": "✅ Отправлено", "sum_already": "⏭️ Already", "sum_outside": "⏰ Outside",
+        "sum_failed": "❌ Ошибок", "sum_asins": "📦 Активных ASIN",
     },
 }
 
@@ -198,8 +228,6 @@ def _load_kpis(_engine) -> dict:
 @st.cache_data(ttl=900)
 def _load_pool(_engine) -> dict:
     """Пул кандидатів за терміновістю + воронка."""
-    # ❗ Спрощено: НЕ застосовуємо returns/refunds/replacements фільтри (оглядовий монітор).
-    #   Точність пулу тут ~на рівні ±кілька % проти реального sender.
     base = """
         FROM spapi.all_orders o
         WHERE o.order_status = 'Shipped'
@@ -241,6 +269,33 @@ def _load_pool(_engine) -> dict:
     return out
 
 
+@st.cache_data(ttl=900)
+def _load_by_asin(_engine, days_back: int = 30) -> pd.DataFrame:
+    """
+    🆕 Розбивка по ASIN: скільки запитів кожного статусу пішло по кожному товару.
+    ASIN у review_request_log немає → JOIN з spapi.all_orders по amazon_order_id.
+    Один order може мати кілька ASIN (по item на рядок) → COUNT(DISTINCT order_id)
+    щоб не роздути лічильник за рахунок multi-item замовлень.
+    """
+    q = text("""
+        SELECT o.asin AS asin,
+               COUNT(DISTINCT l.amazon_order_id) FILTER (WHERE l.status='sent')             AS sent,
+               COUNT(DISTINCT l.amazon_order_id) FILTER (WHERE l.status='already_reviewed') AS already,
+               COUNT(DISTINCT l.amazon_order_id) FILTER (WHERE l.status='outside_window')   AS outside,
+               COUNT(DISTINCT l.amazon_order_id) FILTER (WHERE l.status='failed')           AS failed
+        FROM public.review_request_log l
+        JOIN spapi.all_orders o
+          ON o.amazon_order_id = l.amazon_order_id
+        WHERE l.sent_at >= NOW() - (:days || ' days')::interval
+          AND o.asin IS NOT NULL
+        GROUP BY o.asin
+        ORDER BY sent DESC, already DESC
+    """)
+    with _engine.connect() as conn:
+        df = pd.read_sql(q, conn, params={"days": days_back})
+    return df
+
+
 # ============================================================
 # 📊 РЕНДЕР
 # ============================================================
@@ -260,8 +315,8 @@ def render_review_page(get_engine, T_main, theme, lang):
     st.divider()
 
     with st.spinner(R['loading']):
-        kpi  = _load_kpis(engine)
-        pool = _load_pool(engine)
+        kpi   = _load_kpis(engine)
+        pool  = _load_pool(engine)
         daily = _load_daily(engine, 30)
 
     if daily.empty and pool['pool'] == 0:
@@ -345,6 +400,81 @@ def render_review_page(get_engine, T_main, theme, lang):
             paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
             margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(figf, use_container_width=True)
+
+    # ---- 🆕 BY ASIN ----
+    st.divider()
+    st.markdown(f"### {R['asin_title']}")
+    st.caption(R['asin_sub'])
+
+    # 🆕 перемикач періоду: 7 / 14 / 30 днів
+    period_label_map = {R['per_7']: 7, R['per_14']: 14, R['per_30']: 30}
+    sel = st.radio(R['per_label'], list(period_label_map.keys()),
+                   index=2, horizontal=True, key="asin_period")
+    days_sel = period_label_map[sel]
+
+    by_asin = _load_by_asin(engine, days_sel)
+
+    # 🆕 загальна зведена строка за обраний період
+    if not by_asin.empty:
+        tot_sent    = int(by_asin['sent'].sum())
+        tot_already = int(by_asin['already'].sum())
+        tot_outside = int(by_asin['outside'].sum())
+        tot_failed  = int(by_asin['failed'].sum())
+        n_asins     = int((by_asin['sent'] > 0).sum())
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric(R['sum_sent'], f"{tot_sent:,}")
+        s2.metric(R['sum_already'], f"{tot_already:,}")
+        s3.metric(R['sum_outside'], f"{tot_outside:,}")
+        s4.metric(R['sum_failed'], f"{tot_failed:,}")
+        s5.metric(R['sum_asins'], f"{n_asins:,}")
+
+    if by_asin.empty:
+        st.info(R['asin_no_data'])
+    else:
+        aL, aR = st.columns([1, 1])
+
+        # ---- ЛІВО: бар-чарт топ-15 ASIN за sent ----
+        with aL:
+            st.markdown(f"#### {R['asin_chart_title']}")
+            top = by_asin.sort_values('sent', ascending=False).head(15)
+            figa = px.bar(top, x="sent", y="asin", orientation="h",
+                          color="sent",
+                          color_continuous_scale=['#7c9fff', '#64c896'])
+            figa.update_layout(
+                height=max(300, 26 * len(top)), template=theme['template'],
+                paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
+                showlegend=False, coloraxis_showscale=False,
+                margin=dict(l=0, r=0, t=10, b=0),
+                yaxis=dict(autorange='reversed', title=None),
+                xaxis=dict(title=None))
+            figa.update_xaxes(gridcolor=theme['grid'])
+            st.plotly_chart(figa, use_container_width=True)
+
+        # ---- ПРАВО: таблиця з клікабельними ASIN ----
+        with aR:
+            st.markdown(f"#### {R['asin_table_title']}")
+            tbl = by_asin.copy()
+            # клікабельне посилання на Amazon (US dp)
+            tbl['url'] = "https://www.amazon.com/dp/" + tbl['asin'].astype(str)
+            tbl = tbl.rename(columns={
+                'asin':    R['col_asin'],
+                'sent':    R['col_sent'],
+                'already': R['col_already'],
+                'outside': R['col_outside'],
+                'failed':  R['col_failed'],
+            })
+            st.dataframe(
+                tbl,
+                use_container_width=True,
+                height=max(320, 36 * min(len(tbl), 12)),
+                hide_index=True,
+                column_config={
+                    "url": st.column_config.LinkColumn(
+                        R['col_link'], display_text="🔗 Amazon"
+                    ),
+                    R['col_asin']: st.column_config.TextColumn(R['col_asin']),
+                },
+            )
 
     # ---- DAILY TABLE ----
     if not daily.empty:
