@@ -87,6 +87,10 @@ REVIEW_TRANSLATIONS = {
         "per_label": "Period", "per_7": "7 days", "per_14": "14 days", "per_30": "30 days",
         "sum_sent": "✅ Sent", "sum_already": "⏭️ Already", "sum_outside": "⏰ Outside",
         "sum_failed": "❌ Failed", "sum_asins": "📦 ASINs active",
+        "risk_title": "🛡️ Sending vs negative trend (safety signal)",
+        "risk_sub": "Negative-topic share per ASIN (from Customer Feedback). If negativity is rising — better not to push review requests for that ASIN (you'd be inviting unhappy buyers).",
+        "risk_flag": "Flag", "risk_now": "Neg now", "risk_prev": "Neg prev", "risk_delta": "Δ",
+        "risk_warn": "🔴 {n} ASIN(s) with rising negativity — consider pausing requests for them.",
     },
     "UA": {
         "nav_label": "🧭 Сторінка",
@@ -126,6 +130,10 @@ REVIEW_TRANSLATIONS = {
         "per_label": "Період", "per_7": "7 днів", "per_14": "14 днів", "per_30": "30 днів",
         "sum_sent": "✅ Надіслано", "sum_already": "⏭️ Already", "sum_outside": "⏰ Outside",
         "sum_failed": "❌ Помилок", "sum_asins": "📦 Активних ASIN",
+        "risk_title": "🛡️ Розсилка vs тренд негативу (захисний сигнал)",
+        "risk_sub": "Частка негативних тем по ASIN (з Customer Feedback). Якщо негатив росте — краще НЕ гнати запити на відгук по цьому ASIN (бо кличеш незадоволених покупців).",
+        "risk_flag": "Прапор", "risk_now": "Негатив зараз", "risk_prev": "Негатив до", "risk_delta": "Δ",
+        "risk_warn": "🔴 {n} ASIN з ростом негативу — варто призупинити запити по них.",
     },
     "RU": {
         "nav_label": "🧭 Страница",
@@ -165,6 +173,10 @@ REVIEW_TRANSLATIONS = {
         "per_label": "Период", "per_7": "7 дней", "per_14": "14 дней", "per_30": "30 дней",
         "sum_sent": "✅ Отправлено", "sum_already": "⏭️ Already", "sum_outside": "⏰ Outside",
         "sum_failed": "❌ Ошибок", "sum_asins": "📦 Активных ASIN",
+        "risk_title": "🛡️ Рассылка vs тренд негатива (защитный сигнал)",
+        "risk_sub": "Доля негативных тем по ASIN (из Customer Feedback). Если негатив растёт — лучше НЕ слать запросы на отзыв по этому ASIN (зовёшь недовольных покупателей).",
+        "risk_flag": "Флаг", "risk_now": "Негатив сейчас", "risk_prev": "Негатив до", "risk_delta": "Δ",
+        "risk_warn": "🔴 {n} ASIN с ростом негатива — стоит приостановить запросы по ним.",
     },
 }
 
@@ -293,6 +305,59 @@ def _load_by_asin(_engine, days_back: int = 30) -> pd.DataFrame:
     """)
     with _engine.connect() as conn:
         df = pd.read_sql(q, conn, params={"days": days_back})
+    return df
+
+
+@st.cache_data(ttl=900)
+def _load_negative_trend(_engine) -> pd.DataFrame:
+    """
+    🆕 Захисний сигнал: динаміка частки НЕГАТИВНИХ тем по ASIN.
+    Customer Feedback API не дає кількості відгуків/рейтингу — лише
+    occurrence_pct тем. Беремо найгіршу (max) частку негативу по ASIN
+    на ДВОХ останніх знімках (snapshot_date) і рахуємо дельту.
+
+    delta > 0  → негатив РОСТЕ  → НЕ варто гнати розсилку по цьому ASIN
+    delta < 0  → негатив падає  → можна слати
+
+    Джерело: reviews.item_trends (sentiment='negative').
+    """
+    q = text("""
+        WITH snaps AS (
+            SELECT DISTINCT snapshot_date
+            FROM reviews.item_trends
+            ORDER BY snapshot_date DESC
+            LIMIT 2
+        ),
+        ranked AS (
+            SELECT snapshot_date,
+                   ROW_NUMBER() OVER (ORDER BY snapshot_date DESC) AS rn
+            FROM snaps
+        ),
+        agg AS (
+            SELECT t.asin,
+                   r.rn,
+                   MAX(t.asin_occurrence_pct) AS neg_pct
+            FROM reviews.item_trends t
+            JOIN ranked r ON r.snapshot_date = t.snapshot_date
+            WHERE t.sentiment = 'negative'
+              AND t.asin_occurrence_pct IS NOT NULL
+            GROUP BY t.asin, r.rn
+        )
+        SELECT
+            cur.asin                              AS asin,
+            cur.neg_pct                           AS neg_now,
+            prev.neg_pct                          AS neg_prev,
+            (cur.neg_pct - COALESCE(prev.neg_pct, cur.neg_pct)) AS neg_delta
+        FROM agg cur
+        LEFT JOIN agg prev ON prev.asin = cur.asin AND prev.rn = 2
+        WHERE cur.rn = 1
+    """)
+    try:
+        with _engine.connect() as conn:
+            df = pd.read_sql(q, conn)
+    except Exception:
+        # таблиці reviews.item_trends може не бути / порожня — не валимо сторінку
+        df = pd.DataFrame(columns=["asin", "neg_now", "neg_prev", "neg_delta"])
     return df
 
 
@@ -475,6 +540,52 @@ def render_review_page(get_engine, T_main, theme, lang):
                     R['col_asin']: st.column_config.TextColumn(R['col_asin']),
                 },
             )
+
+        # ---- 🆕 ЗАХИСНИЙ СИГНАЛ: розсилка vs тренд негативу ----
+        neg = _load_negative_trend(engine)
+        if not neg.empty and not by_asin.empty:
+            st.markdown(f"#### {R['risk_title']}")
+            st.caption(R['risk_sub'])
+
+            risk = by_asin.merge(neg, on='asin', how='inner')
+            risk = risk[risk['sent'] > 0].copy()
+
+            if not risk.empty:
+                def _flag(d):
+                    if d is None:
+                        return "—"
+                    if d > 2:   return "🔴"   # негатив помітно росте
+                    if d > 0:   return "🟡"   # трохи росте
+                    return "🟢"               # падає / стабільно
+                risk['flag'] = risk['neg_delta'].apply(_flag)
+                risk = risk.sort_values('neg_delta', ascending=False)
+
+                rt = risk[['flag', 'asin', 'sent', 'neg_now', 'neg_prev', 'neg_delta']].copy()
+                rt['url'] = "https://www.amazon.com/dp/" + rt['asin'].astype(str)
+                rt = rt.rename(columns={
+                    'flag':      R['risk_flag'],
+                    'asin':      R['col_asin'],
+                    'sent':      R['col_sent'],
+                    'neg_now':   R['risk_now'],
+                    'neg_prev':  R['risk_prev'],
+                    'neg_delta': R['risk_delta'],
+                })
+                st.dataframe(
+                    rt,
+                    use_container_width=True,
+                    height=max(240, 36 * min(len(rt), 10)),
+                    hide_index=True,
+                    column_config={
+                        R['risk_now']:   st.column_config.NumberColumn(format="%.1f%%"),
+                        R['risk_prev']:  st.column_config.NumberColumn(format="%.1f%%"),
+                        R['risk_delta']: st.column_config.NumberColumn(format="%+.1f pp"),
+                        "url": st.column_config.LinkColumn(R['col_link'], display_text="🔗"),
+                        R['col_asin']: st.column_config.TextColumn(R['col_asin']),
+                    },
+                )
+                n_red = int((risk['neg_delta'] > 2).sum())
+                if n_red > 0:
+                    st.warning(R['risk_warn'].format(n=n_red))
 
     # ---- DAILY TABLE ----
     if not daily.empty:
