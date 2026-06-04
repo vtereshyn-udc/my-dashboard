@@ -1,6 +1,10 @@
 """
-Sales & Traffic Dashboard v1.3
+2_Amazon_Dashboard.py
 + AI-инсайты через Google Gemini
++ Переключатель страниц: Sales & Traffic / Review Requests
+
+v-fix: добавлен `import requests as req` (нужен для call_gemini — без него
+       AI-блок падал с NameError: name 'req' is not defined).
 """
 
 import streamlit as st
@@ -11,6 +15,7 @@ from plotly.subplots import make_subplots
 from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta
 import os
+import requests as req          # 🆕 нужно для call_gemini (Gemini REST API)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -413,33 +418,35 @@ TOP 5 ASINs BY SALES:
 {top_list}
 """
     return summary
+
+
 def call_gemini(prompt: str):
     """Базовый вызов Gemini API"""
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
-    
+
     # Сначала берем модель из Secrets, если ее нет — используем 2.0-flash как основную
     user_model = st.secrets.get("GEMINI_MODEL", "gemini-2.0-flash")
-    
+
     # Список моделей для перебора (твоя — первая в списке)
     MODELS = [user_model, "gemini-1.5-flash", "gemini-1.5-pro"]
-    
+
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    
+
     for model in MODELS:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             r = req.post(url, json=payload, timeout=45)
             result = r.json()
-            
+
             if "error" in result:
                 continue
-                
+
             if "candidates" in result and result["candidates"]:
                 # Возвращаем текст и модель, которая ответила
                 return result["candidates"][0]["content"]["parts"][0]["text"], model
         except Exception:
             continue
-            
+
     return None, None
 
 
