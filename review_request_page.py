@@ -40,8 +40,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from sqlalchemy import text
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 # ============================================================
@@ -101,6 +102,9 @@ REVIEW_TRANSLATIONS = {
         "cov_leg_prob": "coverage critically low", "cov_about": "About the calculation",
         "cov_c_high": "High coverage", "cov_c_norm": "Within norm",
         "cov_c_below": "Coverage below target", "cov_c_crit": "Coverage critically low",
+        "flt_period": "📅 Order period", "flt_threshold": "Coverage threshold", "flt_status": "Status",
+        "flt_all": "All", "kpi_orders": "🛒 Orders in period",
+        "combo_title": "📊 Orders vs Requests by order date", "combo_processed": "Processed (Sent + Already)",
     },
     "UA": {
         "nav_label": "🧭 Сторінка",
@@ -154,6 +158,9 @@ REVIEW_TRANSLATIONS = {
         "cov_leg_prob": "покриття критично низьке", "cov_about": "Про розрахунок покриття",
         "cov_c_high": "Високе покриття", "cov_c_norm": "У межах норми",
         "cov_c_below": "Покриття нижче цілі", "cov_c_crit": "Покриття критично низьке",
+        "flt_period": "📅 Період замовлення", "flt_threshold": "Поріг покриття", "flt_status": "Статус",
+        "flt_all": "Усі", "kpi_orders": "🛒 Orders у періоді",
+        "combo_title": "📊 Orders vs Requests по датах замовлення", "combo_processed": "Оброблено (Sent + Already)",
     },
     "RU": {
         "nav_label": "🧭 Страница",
@@ -207,6 +214,9 @@ REVIEW_TRANSLATIONS = {
         "cov_leg_prob": "покрытие критически низкое", "cov_about": "О расчёте покрытия",
         "cov_c_high": "Высокое покрытие", "cov_c_norm": "В пределах нормы",
         "cov_c_below": "Покрытие ниже цели", "cov_c_crit": "Покрытие критически низкое",
+        "flt_period": "📅 Период заказа", "flt_threshold": "Порог покрытия", "flt_status": "Статус",
+        "flt_all": "Все", "kpi_orders": "🛒 Orders в периоде",
+        "combo_title": "📊 Orders vs Requests по датам заказа", "combo_processed": "Обработано (Sent + Already)",
     },
 }
 
@@ -238,9 +248,10 @@ def _load_daily(_engine, days_back: int = 30) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=900)
-def _load_coverage(_engine, days_back: int = 30) -> pd.DataFrame:
+def _load_coverage(_engine, date_from, date_to) -> pd.DataFrame:
     """
-    🆕 Контроль покриття request review ПО ДАТІ ЗАМОВЛЕННЯ (purchase_date).
+    🆕 Контроль покриття request review ПО ДАТІ ЗАМОВЛЕННЯ (purchase_date),
+    у межах [date_from, date_to].
     Coverage % = (sent + already) / orders * 100
     Не оброблено = orders - (sent + already)
     orders = всі Shipped замовлення за день (чесний знаменник).
@@ -251,7 +262,7 @@ def _load_coverage(_engine, days_back: int = 30) -> pd.DataFrame:
                    COUNT(DISTINCT o.amazon_order_id) AS orders
             FROM spapi.all_orders o
             WHERE o.order_status = 'Shipped'
-              AND o.purchase_date >= NOW() - (:days || ' days')::interval
+              AND o.purchase_date::date BETWEEN :df AND :dt
             GROUP BY o.purchase_date::date
         ),
         lg AS (
@@ -261,7 +272,7 @@ def _load_coverage(_engine, days_back: int = 30) -> pd.DataFrame:
                    COUNT(DISTINCT l.amazon_order_id) FILTER (WHERE l.status='failed')           AS errors
             FROM public.review_request_log l
             JOIN spapi.all_orders o ON o.amazon_order_id = l.amazon_order_id
-            WHERE o.purchase_date >= NOW() - (:days || ' days')::interval
+            WHERE o.purchase_date::date BETWEEN :df AND :dt
             GROUP BY o.purchase_date::date
         )
         SELECT ord.day,
@@ -274,7 +285,7 @@ def _load_coverage(_engine, days_back: int = 30) -> pd.DataFrame:
         ORDER BY ord.day DESC
     """)
     with _engine.connect() as conn:
-        df = pd.read_sql(q, conn, params={"days": days_back})
+        df = pd.read_sql(q, conn, params={"df": date_from, "dt": date_to})
     if df.empty:
         return df
     df['covered']     = df['sent'] + df['already']
@@ -461,22 +472,78 @@ def render_review_page(get_engine, T_main, theme, lang):
     else:
         st.success(R['health_ok'])
 
-    # ---- KPI ROW ----
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric(R['kpi_today'],     f"{kpi['today']:,}")
-    c2.metric(R['kpi_7d'],        f"{kpi['sent7']:,}")
-    c3.metric(R['kpi_pool'],      f"{pool['pool']:,}")
-    c4.metric(R['kpi_burning'],   f"{pool['burning']:,}",
-              delta="⚠️" if pool['burning'] > 0 else None,
-              delta_color="inverse")
-    c5.metric(R['kpi_failed_7d'], f"{kpi['failed7']:,}",
-              delta_color="inverse")
-    last_str = kpi['last_sent'].strftime('%d.%m %H:%M') if kpi['last_sent'] else "—"
-    c6.metric(R['kpi_last'], last_str)
+    # ---- 🆕 ФІЛЬТРИ (період / поріг / статус) ----
+    fa, fb, fc = st.columns([2, 1, 1])
+    with fa:
+        default_from = (datetime.now().date() - timedelta(days=30))
+        default_to   = datetime.now().date()
+        date_range = st.date_input(
+            R['flt_period'],
+            value=(default_from, default_to),
+            key="cov_date_range",
+        )
+        if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
+            d_from, d_to = date_range
+        else:
+            d_from, d_to = default_from, default_to
+    with fb:
+        threshold = st.selectbox(R['flt_threshold'], [90, 85, 80, 75, 70], index=2)
+    with fc:
+        status_opt = st.selectbox(
+            R['flt_status'],
+            [R['flt_all'], "🟢 OK", "🟡 " + R['cov_warn_lbl'], "🔴 " + R['cov_prob_lbl']],
+        )
+
+    cov = _load_coverage(engine, d_from, d_to)
+
+    # ---- 🆕 KPI ПОКРИТТЯ (по обраному періоду) ----
+    if not cov.empty:
+        tot_orders  = int(cov['orders'].sum())
+        tot_sent    = int(cov['sent'].sum())
+        tot_already = int(cov['already'].sum())
+        tot_errors  = int(cov['errors'].sum())
+        tot_cov     = (cov['covered'].sum() / tot_orders * 100) if tot_orders else 0.0
+
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        k1.metric(R['kpi_orders'],   f"{tot_orders:,}")
+        k2.metric(R['cov_sent'],     f"{tot_sent:,}")
+        k3.metric(R['col_already'],  f"{tot_already:,}")
+        k4.metric(R['cov_pct'],      f"{tot_cov:.1f}%")
+        k5.metric(R['cov_errors'],   f"{tot_errors:,}", delta_color="inverse")
+        last_str = kpi['last_sent'].strftime('%d.%m %H:%M') if kpi['last_sent'] else "—"
+        k6.metric(R['kpi_last'], last_str)
 
     st.divider()
 
-    # ---- DAILY VOLUME (stacked bars) ----
+    # ---- 🆕 ГРАФІК Orders vs Requests + Coverage % лінія ----
+    if not cov.empty:
+        st.markdown(f"### {R['combo_title']}")
+        cc = cov.sort_values('day').copy()
+        cc['day_str'] = pd.to_datetime(cc['day']).dt.strftime('%d.%m')
+        figc = make_subplots(specs=[[{"secondary_y": True}]])
+        figc.add_trace(go.Bar(name=R['kpi_orders'], x=cc['day_str'], y=cc['orders'],
+                              marker_color='#3b5bdb'), secondary_y=False)
+        figc.add_trace(go.Bar(name=R['combo_processed'], x=cc['day_str'], y=cc['covered'],
+                              marker_color='#22b8cf'), secondary_y=False)
+        figc.add_trace(go.Scatter(name=R['cov_pct'], x=cc['day_str'], y=cc['coverage'],
+                              mode='lines+markers', line=dict(color='#cc5de8', width=2)),
+                       secondary_y=True)
+        # лінія порогу
+        figc.add_hline(y=threshold, line_dash="dot", line_color="#ffd43b",
+                       secondary_y=True, opacity=0.6)
+        figc.update_layout(
+            barmode='group', height=380, template=theme['template'],
+            paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
+            margin=dict(l=0, r=0, t=10, b=0), hovermode='x unified',
+            legend=dict(orientation="h", y=1.1))
+        figc.update_xaxes(gridcolor=theme['grid'])
+        figc.update_yaxes(gridcolor=theme['grid'], secondary_y=False)
+        figc.update_yaxes(range=[0, 105], secondary_y=True, ticksuffix="%", showgrid=False)
+        st.plotly_chart(figc, use_container_width=True)
+
+    st.divider()
+
+    # ---- DAILY VOLUME (stacked bars, по даті відправки) ----
     st.markdown(f"### {R['daily_title']}")
     st.caption(R['legend_hint'], unsafe_allow_html=True)
     if not daily.empty:
@@ -656,7 +723,6 @@ def render_review_page(get_engine, T_main, theme, lang):
                     st.warning(R['risk_warn'].format(n=n_red))
 
     # ---- COVERAGE CONTROL (по дате заказа) ----
-    cov = _load_coverage(engine, 30)
     if not cov.empty:
         st.divider()
         st.markdown(f"### {R['cov_title']}")
@@ -665,25 +731,29 @@ def render_review_page(get_engine, T_main, theme, lang):
 
         with cL:
             disp = cov.copy()
-            disp['day'] = pd.to_datetime(disp['day']).dt.strftime('%d.%m.%Y')
 
             def _status(c):
                 if c is None or pd.isna(c):
                     return "⚪ —"
-                if c >= 90:  return "🟢 OK"
-                if c >= 80:  return "🟡 " + R['cov_warn_lbl']
+                if c >= 90:           return "🟢 OK"
+                if c >= threshold:    return "🟡 " + R['cov_warn_lbl']
                 return "🔴 " + R['cov_prob_lbl']
             disp['status'] = disp['coverage'].apply(_status)
 
             def _comment(c):
                 if c is None or pd.isna(c):
                     return "—"
-                if c >= 92:  return R['cov_c_high']
-                if c >= 90:  return R['cov_c_norm']
-                if c >= 80:  return R['cov_c_below']
+                if c >= 92:         return R['cov_c_high']
+                if c >= 90:         return R['cov_c_norm']
+                if c >= threshold:  return R['cov_c_below']
                 return R['cov_c_crit']
             disp['comment'] = disp['coverage'].apply(_comment)
 
+            # 🆕 фільтр по статусу
+            if status_opt != R['flt_all']:
+                disp = disp[disp['status'].str.startswith(status_opt.split()[0])]
+
+            disp['day'] = pd.to_datetime(disp['day']).dt.strftime('%d.%m.%Y')
             disp = disp[['day', 'orders', 'sent', 'already', 'errors',
                          'coverage', 'unprocessed', 'status', 'comment']]
             disp = disp.rename(columns={
@@ -709,11 +779,11 @@ def render_review_page(get_engine, T_main, theme, lang):
             st.markdown(f"**{R['cov_legend']}**")
             st.markdown(
                 f"🟢 **OK** (≥90%) — {R['cov_leg_ok']}\n\n"
-                f"🟡 **{R['cov_warn_lbl']}** (80–89.9%) — {R['cov_leg_warn']}\n\n"
-                f"🔴 **{R['cov_prob_lbl']}** (<80%) — {R['cov_leg_prob']}"
+                f"🟡 **{R['cov_warn_lbl']}** ({threshold}–89.9%) — {R['cov_leg_warn']}\n\n"
+                f"🔴 **{R['cov_prob_lbl']}** (<{threshold}%) — {R['cov_leg_prob']}"
             )
             st.caption(
                 f"**{R['cov_about']}**\n\n"
                 f"`Coverage % = (Sent + Already) / Orders × 100`\n\n"
                 f"`{R['cov_unproc']} = Orders − (Sent + Already)`"
-            ) 
+            )
