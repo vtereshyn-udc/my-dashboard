@@ -109,6 +109,14 @@ REVIEW_TRANSLATIONS = {
         "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window",
         "cov_leg_maturing": "order too recent — wait for the send window",
         "guide_title": "📖 Guide: how to use this monitor",
+        "missed_title": "💸 Missed orders (lost reviews)",
+        "missed_sub": "Orders whose 5–30 day window has fully passed with NO request sent — permanently lost review chances.",
+        "missed_lbl": "Missed", "missed_total": "Total missed (30d)",
+        "missed_none": "✅ No missed orders — the window is fully covered.",
+        "heat_title": "🗓️ Coverage heatmap (weekday × week)",
+        "heat_sub": "Coverage % by day. Spot weak spots — e.g. weekends or specific days dropping.",
+        "heat_none": "⚠️ Not enough matured data for the heatmap yet.",
+        "heat_dow": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
         "guide_md": """
 **What this page is**
 
@@ -198,6 +206,14 @@ Amazon only allows a request when an order is 5–30 days old. Recent orders are
         "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна",
         "cov_leg_maturing": "замовлення надто свіже — чекаємо вікно відправки",
         "guide_title": "📖 Інструкція: як користуватися цим монітором",
+        "missed_title": "💸 Упущені замовлення (втрачені відгуки)",
+        "missed_sub": "Замовлення, у яких вікно 5–30 днів повністю минуло БЕЗ відправки запиту — безповоротно втрачені шанси на відгук.",
+        "missed_lbl": "Упущено", "missed_total": "Усього упущено (30д)",
+        "missed_none": "✅ Упущених немає — вікно повністю покрите.",
+        "heat_title": "🗓️ Heatmap покриття (день × тиждень)",
+        "heat_sub": "% покриття по днях. Лови слабкі місця — напр. вихідні чи певні дні просідають.",
+        "heat_none": "⚠️ Ще замало дозрілих даних для heatmap.",
+        "heat_dow": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"],
         "guide_md": """
 **Що це за сторінка**
 
@@ -287,6 +303,14 @@ Amazon дозволяє надіслати запит лише коли замо
         "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна",
         "cov_leg_maturing": "заказ слишком свежий — ждём окно отправки",
         "guide_title": "📖 Инструкция: как пользоваться этим монитором",
+        "missed_title": "💸 Упущенные заказы (потерянные отзывы)",
+        "missed_sub": "Заказы, у которых окно 5–30 дней полностью прошло БЕЗ отправки запроса — безвозвратно потерянные шансы на отзыв.",
+        "missed_lbl": "Упущено", "missed_total": "Всего упущено (30д)",
+        "missed_none": "✅ Упущенных нет — окно полностью покрыто.",
+        "heat_title": "🗓️ Heatmap покрытия (день × неделя)",
+        "heat_sub": "% покрытия по дням. Лови слабые места — напр. выходные или отдельные дни проседают.",
+        "heat_none": "⚠️ Пока мало дозревших данных для heatmap.",
+        "heat_dow": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
         "guide_md": """
 **Что это за страница**
 
@@ -390,6 +414,80 @@ def _load_coverage(_engine, date_from, date_to) -> pd.DataFrame:
     df['covered']     = df['sent'] + df['already']
     df['unprocessed'] = (df['orders'] - df['covered']).clip(lower=0)
     df['coverage']    = (df['covered'] / df['orders'].replace(0, pd.NA) * 100).round(1)
+    return df
+
+
+@st.cache_data(ttl=900)
+def _load_missed(_engine, days_back: int = 60) -> pd.DataFrame:
+    """
+    🆕 #2 УПУЩЕНІ замовлення: вікно (5-30 днів) ВЖЕ МИНУЛО,
+    а запит так і не пішов (немає sent/already в логу).
+    Це безповоротно втрачені відгуки.
+    Рахуємо по даті замовлення для замовлень старших за 30 днів.
+    """
+    q = text("""
+        SELECT o.purchase_date::date AS day,
+               COUNT(DISTINCT o.amazon_order_id) AS orders,
+               COUNT(DISTINCT o.amazon_order_id) FILTER (
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM public.review_request_log l
+                       WHERE l.amazon_order_id = o.amazon_order_id
+                         AND l.status IN ('sent','already_reviewed')
+                   )
+               ) AS missed
+        FROM spapi.all_orders o
+        WHERE o.order_status = 'Shipped'
+          AND o.purchase_date::date <  NOW()::date - INTERVAL '30 days'
+          AND o.purchase_date::date >= NOW()::date - (:days || ' days')::interval
+        GROUP BY o.purchase_date::date
+        ORDER BY o.purchase_date::date
+    """)
+    with _engine.connect() as conn:
+        df = pd.read_sql(q, conn, params={"days": days_back})
+    return df
+
+
+@st.cache_data(ttl=900)
+def _load_heatmap(_engine, weeks_back: int = 8) -> pd.DataFrame:
+    """
+    🆕 #3 Heatmap покриття: % покриття по (тиждень × день тижня).
+    Тільки «дозрілі» дати (старші 8 днів), щоб не показувати незрілі як провал.
+    """
+    q = text("""
+        WITH ord AS (
+            SELECT o.purchase_date::date AS day,
+                   COUNT(DISTINCT o.amazon_order_id) AS orders
+            FROM spapi.all_orders o
+            WHERE o.order_status = 'Shipped'
+              AND o.purchase_date::date <  NOW()::date - INTERVAL '8 days'
+              AND o.purchase_date::date >= NOW()::date - (:wk * 7 || ' days')::interval
+            GROUP BY o.purchase_date::date
+        ),
+        cov AS (
+            SELECT o.purchase_date::date AS day,
+                   COUNT(DISTINCT l.amazon_order_id) FILTER (
+                       WHERE l.status IN ('sent','already_reviewed')
+                   ) AS covered
+            FROM public.review_request_log l
+            JOIN spapi.all_orders o ON o.amazon_order_id = l.amazon_order_id
+            WHERE o.purchase_date::date <  NOW()::date - INTERVAL '8 days'
+              AND o.purchase_date::date >= NOW()::date - (:wk * 7 || ' days')::interval
+            GROUP BY o.purchase_date::date
+        )
+        SELECT ord.day,
+               ord.orders,
+               COALESCE(cov.covered, 0) AS covered
+        FROM ord LEFT JOIN cov ON cov.day = ord.day
+        ORDER BY ord.day
+    """)
+    with _engine.connect() as conn:
+        df = pd.read_sql(q, conn, params={"wk": weeks_back})
+    if df.empty:
+        return df
+    df['day']      = pd.to_datetime(df['day'])
+    df['coverage'] = (df['covered'] / df['orders'].replace(0, pd.NA) * 100).round(0)
+    df['dow']      = df['day'].dt.dayofweek          # 0=Пн
+    df['week']     = df['day'].dt.strftime('%d.%m')  # підпис тижня (поч. дня)
     return df
 
 
@@ -723,6 +821,62 @@ def render_review_page(get_engine, T_main, theme, lang):
                 f"`Coverage % = (Sent + Already) / Orders × 100`\n\n"
                 f"`{R['cov_unproc']} = Orders − (Sent + Already)`"
             )
+
+    st.divider()
+
+    # ---- 🆕 #2 УПУЩЕННЫЕ ЗАКАЗЫ (потери) + #3 HEATMAP ----
+    missed = _load_missed(engine, 60)
+    heat   = _load_heatmap(engine, 8)
+
+    mL, mR = st.columns(2)
+
+    with mL:
+        st.markdown(f"### {R['missed_title']}")
+        st.caption(R['missed_sub'])
+        if not missed.empty and missed['missed'].sum() > 0:
+            md = missed.copy()
+            md['day'] = pd.to_datetime(md['day']).dt.strftime('%d.%m')
+            figm = go.Figure()
+            figm.add_trace(go.Bar(x=md['day'], y=md['missed'],
+                                  marker_color='#e8590c', name=R['missed_lbl']))
+            figm.update_layout(
+                height=320, template=theme['template'],
+                paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
+                margin=dict(l=0, r=0, t=10, b=0), showlegend=False)
+            figm.update_xaxes(gridcolor=theme['grid'])
+            figm.update_yaxes(gridcolor=theme['grid'])
+            st.plotly_chart(figm, use_container_width=True)
+            total_missed = int(missed['missed'].sum())
+            total_ord    = int(missed['orders'].sum())
+            pct = (total_missed / total_ord * 100) if total_ord else 0
+            st.metric(R['missed_total'], f"{total_missed:,}", delta=f"{pct:.1f}%",
+                      delta_color="inverse")
+        else:
+            st.success(R['missed_none'])
+
+    with mR:
+        st.markdown(f"### {R['heat_title']}")
+        st.caption(R['heat_sub'])
+        if not heat.empty:
+            dow_names = R['heat_dow']  # список 7 коротких назв (Пн..Вс)
+            piv = heat.pivot_table(index='dow', columns='week',
+                                   values='coverage', aggfunc='mean')
+            piv = piv.reindex(range(7))
+            figh = go.Figure(data=go.Heatmap(
+                z=piv.values,
+                x=list(piv.columns),
+                y=[dow_names[i] for i in piv.index],
+                colorscale=[[0, '#e03131'], [0.8, '#ffd43b'], [1, '#2f9e44']],
+                zmin=0, zmax=100,
+                colorbar=dict(title="%", ticksuffix="%"),
+                hovertemplate="%{y} · %{x}<br>%{z:.0f}%<extra></extra>"))
+            figh.update_layout(
+                height=320, template=theme['template'],
+                paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
+                margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(figh, use_container_width=True)
+        else:
+            st.info(R['heat_none'])
 
     st.divider()
 
