@@ -99,7 +99,7 @@ REVIEW_TRANSLATIONS = {
         "cov_warn_lbl": "Attention", "cov_prob_lbl": "Low coverage",
         "cov_legend": "Status legend",
         "cov_leg_ok": "coverage at target", "cov_leg_warn": "coverage below target",
-        "cov_leg_prob": "coverage below the target", "cov_about": "About the calculation",
+        "cov_leg_prob": "coverage below the target", "cov_about": "About the calculation", "cov_leg_ok2": "All good — requests went out, nothing to do.", "cov_leg_prob2": "Below target. If the date is older than 8 days — run/check the sender to resend. If older than 30 days — the window closed, reviews are lost (see Missed orders).", "cov_leg_mat2": "Order is too fresh (under ~8 days) — the 5–30 day window hasn't opened yet. Normal, will be covered automatically.",
         "cov_c_high": "High coverage", "cov_c_norm": "Within norm",
         "cov_c_below": "Coverage below target", "cov_c_crit": "Coverage below target — resend requests",
         "flt_period": "📅 Order period", "flt_threshold": "Coverage threshold", "flt_status": "Status",
@@ -196,7 +196,7 @@ Amazon only allows a request when an order is 5–30 days old. Recent orders are
         "cov_warn_lbl": "Увага", "cov_prob_lbl": "Низьке покриття",
         "cov_legend": "Легенда статусів",
         "cov_leg_ok": "покриття на цільовому рівні", "cov_leg_warn": "покриття нижче цілі",
-        "cov_leg_prob": "покриття нижче цілі", "cov_about": "Про розрахунок покриття",
+        "cov_leg_prob": "покриття нижче цілі", "cov_about": "Про розрахунок покриття", "cov_leg_ok2": "Усе добре — запити пішли, нічого робити не треба.", "cov_leg_prob2": "Нижче цілі. Якщо даті більше 8 днів — запусти/перевір сендер, щоб дослати. Якщо більше 30 днів — вікно закрилось, відгуки втрачені (див. Упущені).", "cov_leg_mat2": "Замовлення надто свіже (молодше ~8 днів) — вікно 5–30 днів ще не відкрилось. Це норма, покриється автоматично.",
         "cov_c_high": "Високе покриття", "cov_c_norm": "У межах норми",
         "cov_c_below": "Покриття нижче цілі", "cov_c_crit": "Покриття нижче цілі — дослати запити",
         "flt_period": "📅 Період замовлення", "flt_threshold": "Поріг покриття", "flt_status": "Статус",
@@ -293,7 +293,7 @@ Amazon дозволяє надіслати запит лише коли замо
         "cov_warn_lbl": "Внимание", "cov_prob_lbl": "Низкое покрытие",
         "cov_legend": "Легенда статусов",
         "cov_leg_ok": "покрытие на целевом уровне", "cov_leg_warn": "покрытие ниже цели",
-        "cov_leg_prob": "покрытие ниже цели", "cov_about": "О расчёте покрытия",
+        "cov_leg_prob": "покрытие ниже цели", "cov_about": "О расчёте покрытия", "cov_leg_ok2": "Всё хорошо — запросы ушли, делать ничего не нужно.", "cov_leg_prob2": "Ниже цели. Если дате больше 8 дней — запусти/проверь сендер, чтобы дослать. Если больше 30 дней — окно закрылось, отзывы потеряны (см. Упущенные).", "cov_leg_mat2": "Заказ слишком свежий (моложе ~8 дней) — окно 5–30 дней ещё не открылось. Это норма, покроется автоматически.",
         "cov_c_high": "Высокое покрытие", "cov_c_norm": "В пределах нормы",
         "cov_c_below": "Покрытие ниже цели", "cov_c_crit": "Покрытие ниже цели — дослать запросы",
         "flt_period": "📅 Период заказа", "flt_threshold": "Порог покрытия", "flt_status": "Статус",
@@ -849,9 +849,13 @@ def render_review_page(get_engine, T_main, theme, lang):
         with cR:
             st.markdown(f"**{R['cov_legend']}**")
             st.markdown(
-                f"🟢 **OK** (≥{threshold}%) — {R['cov_leg_ok']}\n\n"
-                f"🔴 **{R['cov_prob_lbl']}** (<{threshold}%) — {R['cov_leg_prob']}\n\n"
-                f"⏳ **{R['cov_maturing']}** — {R['cov_leg_maturing']}"
+                f"🟢 **OK** (≥{threshold}%)\n\n"
+                f"<span style='opacity:.75'>{R['cov_leg_ok2']}</span>\n\n"
+                f"🔴 **{R['cov_prob_lbl']}** (<{threshold}%)\n\n"
+                f"<span style='opacity:.75'>{R['cov_leg_prob2']}</span>\n\n"
+                f"⏳ **{R['cov_maturing']}**\n\n"
+                f"<span style='opacity:.75'>{R['cov_leg_mat2']}</span>",
+                unsafe_allow_html=True,
             )
             st.caption(
                 f"**{R['cov_about']}**\n\n"
@@ -1104,4 +1108,4 @@ def render_review_page(get_engine, T_main, theme, lang):
                 )
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
-                    st.warning(R['risk_warn'].format(n=n_red)) 
+                    st.warning(R['risk_warn'].format(n=n_red))
