@@ -99,7 +99,7 @@ REVIEW_TRANSLATIONS = {
         "cov_warn_lbl": "Attention", "cov_prob_lbl": "Low coverage",
         "cov_legend": "Status legend",
         "cov_leg_ok": "coverage at target", "cov_leg_warn": "coverage below target",
-        "cov_leg_prob": "coverage critically low", "cov_about": "About the calculation",
+        "cov_leg_prob": "coverage below the target", "cov_about": "About the calculation",
         "cov_c_high": "High coverage", "cov_c_norm": "Within norm",
         "cov_c_below": "Coverage below target", "cov_c_crit": "Coverage below target — resend requests",
         "flt_period": "📅 Order period", "flt_threshold": "Coverage threshold", "flt_status": "Status",
@@ -196,7 +196,7 @@ Amazon only allows a request when an order is 5–30 days old. Recent orders are
         "cov_warn_lbl": "Увага", "cov_prob_lbl": "Низьке покриття",
         "cov_legend": "Легенда статусів",
         "cov_leg_ok": "покриття на цільовому рівні", "cov_leg_warn": "покриття нижче цілі",
-        "cov_leg_prob": "покриття критично низьке", "cov_about": "Про розрахунок покриття",
+        "cov_leg_prob": "покриття нижче цілі", "cov_about": "Про розрахунок покриття",
         "cov_c_high": "Високе покриття", "cov_c_norm": "У межах норми",
         "cov_c_below": "Покриття нижче цілі", "cov_c_crit": "Покриття нижче цілі — дослати запити",
         "flt_period": "📅 Період замовлення", "flt_threshold": "Поріг покриття", "flt_status": "Статус",
@@ -293,7 +293,7 @@ Amazon дозволяє надіслати запит лише коли замо
         "cov_warn_lbl": "Внимание", "cov_prob_lbl": "Низкое покрытие",
         "cov_legend": "Легенда статусов",
         "cov_leg_ok": "покрытие на целевом уровне", "cov_leg_warn": "покрытие ниже цели",
-        "cov_leg_prob": "покрытие критически низкое", "cov_about": "О расчёте покрытия",
+        "cov_leg_prob": "покрытие ниже цели", "cov_about": "О расчёте покрытия",
         "cov_c_high": "Высокое покрытие", "cov_c_norm": "В пределах нормы",
         "cov_c_below": "Покрытие ниже цели", "cov_c_crit": "Покрытие ниже цели — дослать запросы",
         "flt_period": "📅 Период заказа", "flt_threshold": "Порог покрытия", "flt_status": "Статус",
@@ -695,7 +695,7 @@ def render_review_page(get_engine, T_main, theme, lang):
     with fc:
         status_opt = st.selectbox(
             R['flt_status'],
-            [R['flt_all'], "🟢 OK", "🟡 " + R['cov_warn_lbl'],
+            [R['flt_all'], "🟢 OK",
              "🔴 " + R['cov_prob_lbl'], "⏳ " + R['cov_maturing']],
         )
 
@@ -769,8 +769,7 @@ def render_review_page(get_engine, T_main, theme, lang):
                     return "⏳ " + R['cov_maturing']
                 if c is None or pd.isna(c):
                     return "⚪ —"
-                if c >= 90:           return "🟢 OK"
-                if c >= threshold:    return "🟡 " + R['cov_warn_lbl']
+                if c >= threshold:    return "🟢 OK"
                 return "🔴 " + R['cov_prob_lbl']
             disp['status'] = disp.apply(_status, axis=1)
 
@@ -781,9 +780,8 @@ def render_review_page(get_engine, T_main, theme, lang):
                     return R['cov_c_maturing']   # ще у вікні / не дозріло
                 if c is None or pd.isna(c):
                     return "—"
-                if c >= 92:         return R['cov_c_high']
-                if c >= 90:         return R['cov_c_norm']
-                if c >= threshold:  return R['cov_c_below']
+                if c >= 95:         return R['cov_c_high']
+                if c >= threshold:  return R['cov_c_norm']
                 return R['cov_c_crit']
             disp['comment'] = disp.apply(_comment, axis=1)
 
@@ -851,8 +849,7 @@ def render_review_page(get_engine, T_main, theme, lang):
         with cR:
             st.markdown(f"**{R['cov_legend']}**")
             st.markdown(
-                f"🟢 **OK** (≥90%) — {R['cov_leg_ok']}\n\n"
-                f"🟡 **{R['cov_warn_lbl']}** ({threshold}–89.9%) — {R['cov_leg_warn']}\n\n"
+                f"🟢 **OK** (≥{threshold}%) — {R['cov_leg_ok']}\n\n"
                 f"🔴 **{R['cov_prob_lbl']}** (<{threshold}%) — {R['cov_leg_prob']}\n\n"
                 f"⏳ **{R['cov_maturing']}** — {R['cov_leg_maturing']}"
             )
@@ -1107,4 +1104,4 @@ def render_review_page(get_engine, T_main, theme, lang):
                 )
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
-                    st.warning(R['risk_warn'].format(n=n_red))
+                    st.warning(R['risk_warn'].format(n=n_red)) 
