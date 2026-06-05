@@ -91,6 +91,16 @@ REVIEW_TRANSLATIONS = {
         "risk_sub": "The #1 negative topic per ASIN (from Customer Feedback) and how much it drags the rating. If a topic hurts the rating a lot — better not to push review requests for that ASIN.",
         "risk_flag": "Flag", "risk_topic": "Top negative topic", "risk_pct": "Mentions", "risk_impact": "★ impact",
         "risk_warn": "🔴 {n} ASIN(s) with a strongly rating-damaging topic — consider pausing requests for them.",
+        "cov_title": "📋 Request-review coverage control by order date",
+        "cov_date": "Order date", "cov_orders": "Orders", "cov_sent": "Requests sent",
+        "cov_errors": "Errors", "cov_pct": "Coverage %", "cov_unproc": "Unprocessed",
+        "cov_status": "Status", "cov_comment": "Comment",
+        "cov_warn_lbl": "Attention", "cov_prob_lbl": "Problem",
+        "cov_legend": "Status legend",
+        "cov_leg_ok": "coverage at target", "cov_leg_warn": "coverage below target",
+        "cov_leg_prob": "coverage critically low", "cov_about": "About the calculation",
+        "cov_c_high": "High coverage", "cov_c_norm": "Within norm",
+        "cov_c_below": "Coverage below target", "cov_c_crit": "Coverage critically low",
     },
     "UA": {
         "nav_label": "🧭 Сторінка",
@@ -134,6 +144,16 @@ REVIEW_TRANSLATIONS = {
         "risk_sub": "Головна негативна тема по ASIN (з Customer Feedback) і наскільки вона тягне рейтинг вниз. Якщо тема сильно шкодить рейтингу — краще НЕ гнати запити по цьому ASIN.",
         "risk_flag": "Прапор", "risk_topic": "Топ негативна тема", "risk_pct": "Згадувань", "risk_impact": "★ вплив",
         "risk_warn": "🔴 {n} ASIN із темою, що сильно псує рейтинг — варто призупинити запити по них.",
+        "cov_title": "📋 Контроль покриття request review по датах замовлень",
+        "cov_date": "Дата замовлення", "cov_orders": "Orders", "cov_sent": "Requests sent",
+        "cov_errors": "Errors", "cov_pct": "Coverage %", "cov_unproc": "Не оброблено",
+        "cov_status": "Статус", "cov_comment": "Коментар",
+        "cov_warn_lbl": "Увага", "cov_prob_lbl": "Проблема",
+        "cov_legend": "Легенда статусів",
+        "cov_leg_ok": "покриття на цільовому рівні", "cov_leg_warn": "покриття нижче цілі",
+        "cov_leg_prob": "покриття критично низьке", "cov_about": "Про розрахунок покриття",
+        "cov_c_high": "Високе покриття", "cov_c_norm": "У межах норми",
+        "cov_c_below": "Покриття нижче цілі", "cov_c_crit": "Покриття критично низьке",
     },
     "RU": {
         "nav_label": "🧭 Страница",
@@ -177,6 +197,16 @@ REVIEW_TRANSLATIONS = {
         "risk_sub": "Главная негативная тема по ASIN (из Customer Feedback) и насколько она тянет рейтинг вниз. Если тема сильно вредит рейтингу — лучше НЕ слать запросы по этому ASIN.",
         "risk_flag": "Флаг", "risk_topic": "Топ негативная тема", "risk_pct": "Упоминаний", "risk_impact": "★ влияние",
         "risk_warn": "🔴 {n} ASIN с темой, сильно портящей рейтинг — стоит приостановить запросы по ним.",
+        "cov_title": "📋 Контроль покрытия request review по датам заказов",
+        "cov_date": "Дата заказа", "cov_orders": "Orders", "cov_sent": "Requests sent",
+        "cov_errors": "Errors", "cov_pct": "Coverage %", "cov_unproc": "Не обработано",
+        "cov_status": "Статус", "cov_comment": "Комментарий",
+        "cov_warn_lbl": "Внимание", "cov_prob_lbl": "Проблема",
+        "cov_legend": "Легенда статусов",
+        "cov_leg_ok": "покрытие на целевом уровне", "cov_leg_warn": "покрытие ниже цели",
+        "cov_leg_prob": "покрытие критически низкое", "cov_about": "О расчёте покрытия",
+        "cov_c_high": "Высокое покрытие", "cov_c_norm": "В пределах нормы",
+        "cov_c_below": "Покрытие ниже цели", "cov_c_crit": "Покрытие критически низкое",
     },
 }
 
@@ -204,6 +234,52 @@ def _load_daily(_engine, days_back: int = 30) -> pd.DataFrame:
         df = pd.read_sql(q, conn, params={"days": days_back})
     if not df.empty:
         df['day'] = pd.to_datetime(df['day'])
+    return df
+
+
+@st.cache_data(ttl=900)
+def _load_coverage(_engine, days_back: int = 30) -> pd.DataFrame:
+    """
+    🆕 Контроль покриття request review ПО ДАТІ ЗАМОВЛЕННЯ (purchase_date).
+    Coverage % = (sent + already) / orders * 100
+    Не оброблено = orders - (sent + already)
+    orders = всі Shipped замовлення за день (чесний знаменник).
+    """
+    q = text("""
+        WITH ord AS (
+            SELECT o.purchase_date::date AS day,
+                   COUNT(DISTINCT o.amazon_order_id) AS orders
+            FROM spapi.all_orders o
+            WHERE o.order_status = 'Shipped'
+              AND o.purchase_date >= NOW() - (:days || ' days')::interval
+            GROUP BY o.purchase_date::date
+        ),
+        lg AS (
+            SELECT o.purchase_date::date AS day,
+                   COUNT(DISTINCT l.amazon_order_id) FILTER (WHERE l.status='sent')             AS sent,
+                   COUNT(DISTINCT l.amazon_order_id) FILTER (WHERE l.status='already_reviewed') AS already,
+                   COUNT(DISTINCT l.amazon_order_id) FILTER (WHERE l.status='failed')           AS errors
+            FROM public.review_request_log l
+            JOIN spapi.all_orders o ON o.amazon_order_id = l.amazon_order_id
+            WHERE o.purchase_date >= NOW() - (:days || ' days')::interval
+            GROUP BY o.purchase_date::date
+        )
+        SELECT ord.day,
+               ord.orders,
+               COALESCE(lg.sent, 0)    AS sent,
+               COALESCE(lg.already, 0) AS already,
+               COALESCE(lg.errors, 0)  AS errors
+        FROM ord
+        LEFT JOIN lg ON lg.day = ord.day
+        ORDER BY ord.day DESC
+    """)
+    with _engine.connect() as conn:
+        df = pd.read_sql(q, conn, params={"days": days_back})
+    if df.empty:
+        return df
+    df['covered']     = df['sent'] + df['already']
+    df['unprocessed'] = (df['orders'] - df['covered']).clip(lower=0)
+    df['coverage']    = (df['covered'] / df['orders'].replace(0, pd.NA) * 100).round(1)
     return df
 
 
@@ -579,14 +655,65 @@ def render_review_page(get_engine, T_main, theme, lang):
                 if n_red > 0:
                     st.warning(R['risk_warn'].format(n=n_red))
 
-    # ---- DAILY TABLE ----
-    if not daily.empty:
+    # ---- COVERAGE CONTROL (по дате заказа) ----
+    cov = _load_coverage(engine, 30)
+    if not cov.empty:
         st.divider()
-        st.markdown(f"### {R['table_title']}")
-        t = daily.sort_values('day', ascending=False).copy()
-        t['day'] = t['day'].dt.strftime('%Y-%m-%d')
-        t = t.rename(columns={
-            'day': R['col_day'], 'sent': R['col_sent'], 'already': R['col_already'],
-            'outside': R['col_outside'], 'failed': R['col_failed'], 'total': R['col_total'],
-        })
-        st.dataframe(t, use_container_width=True, height=320)
+        st.markdown(f"### {R['cov_title']}")
+
+        cL, cR = st.columns([3, 1])
+
+        with cL:
+            disp = cov.copy()
+            disp['day'] = pd.to_datetime(disp['day']).dt.strftime('%d.%m.%Y')
+
+            def _status(c):
+                if c is None or pd.isna(c):
+                    return "⚪ —"
+                if c >= 90:  return "🟢 OK"
+                if c >= 80:  return "🟡 " + R['cov_warn_lbl']
+                return "🔴 " + R['cov_prob_lbl']
+            disp['status'] = disp['coverage'].apply(_status)
+
+            def _comment(c):
+                if c is None or pd.isna(c):
+                    return "—"
+                if c >= 92:  return R['cov_c_high']
+                if c >= 90:  return R['cov_c_norm']
+                if c >= 80:  return R['cov_c_below']
+                return R['cov_c_crit']
+            disp['comment'] = disp['coverage'].apply(_comment)
+
+            disp = disp[['day', 'orders', 'sent', 'already', 'errors',
+                         'coverage', 'unprocessed', 'status', 'comment']]
+            disp = disp.rename(columns={
+                'day':         R['cov_date'],
+                'orders':      R['cov_orders'],
+                'sent':        R['cov_sent'],
+                'already':     R['col_already'],
+                'errors':      R['cov_errors'],
+                'coverage':    R['cov_pct'],
+                'unprocessed': R['cov_unproc'],
+                'status':      R['cov_status'],
+                'comment':     R['cov_comment'],
+            })
+            st.dataframe(
+                disp, use_container_width=True, hide_index=True,
+                height=max(320, 36 * min(len(disp), 16)),
+                column_config={
+                    R['cov_pct']: st.column_config.NumberColumn(format="%.1f%%"),
+                },
+            )
+
+        with cR:
+            st.markdown(f"**{R['cov_legend']}**")
+            st.markdown(
+                f"🟢 **OK** (≥90%) — {R['cov_leg_ok']}\n\n"
+                f"🟡 **{R['cov_warn_lbl']}** (80–89.9%) — {R['cov_leg_warn']}\n\n"
+                f"🔴 **{R['cov_prob_lbl']}** (<80%) — {R['cov_leg_prob']}"
+            )
+            st.caption(
+                f"**{R['cov_about']}**\n\n"
+                f"`Coverage % = (Sent + Already) / Orders × 100`\n\n"
+                f"`{R['cov_unproc']} = Orders − (Sent + Already)`"
+            )
