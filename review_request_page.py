@@ -106,7 +106,7 @@ REVIEW_TRANSLATIONS = {
         "flt_all": "All", "kpi_orders": "🛒 Orders in period",
         "combo_title": "📊 Orders vs Requests by order date", "combo_processed": "Processed (Sent + Already)",
         "cov_note": "ℹ️ Requests can only be sent when an order is 5–30 days old. Recent dates (under ~8 days) show ⏳ Maturing — that's normal: coverage there isn't possible yet. 🔴 Low coverage marks dates whose window has already passed where requests should be resent. Increasing send frequency won't speed this up.",
-        "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window", "cov_total": "▦ TOTAL",
+        "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window", "cov_total": "▦ TOTAL", "cov_total_note": "matured dates only (excl. ⏳)",
         "cov_leg_maturing": "order too recent — wait for the send window",
         "guide_title": "📖 Guide: how to use this monitor",
         "missed_title": "💸 Missed orders (lost reviews)",
@@ -203,7 +203,7 @@ Amazon only allows a request when an order is 5–30 days old. Recent orders are
         "flt_all": "Усі", "kpi_orders": "🛒 Orders у періоді",
         "combo_title": "📊 Orders vs Requests по датах замовлення", "combo_processed": "Оброблено (Sent + Already)",
         "cov_note": "ℹ️ Запит можна відправити лише коли замовленню 5–30 днів. Свіжі дати (молодші ~8 днів) показують ⏳ Зріє — це норма: покриття там ще неможливе. 🔴 Низьке покриття позначає дати з уже минулим вікном, де варто дослати запити. Збільшення частоти відправки це НЕ прискорить.",
-        "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна", "cov_total": "▦ РАЗОМ",
+        "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна", "cov_total": "▦ РАЗОМ", "cov_total_note": "лише дозрілі дати (без ⏳)",
         "cov_leg_maturing": "замовлення надто свіже — чекаємо вікно відправки",
         "guide_title": "📖 Інструкція: як користуватися цим монітором",
         "missed_title": "💸 Упущені замовлення (втрачені відгуки)",
@@ -300,7 +300,7 @@ Amazon дозволяє надіслати запит лише коли замо
         "flt_all": "Все", "kpi_orders": "🛒 Orders в периоде",
         "combo_title": "📊 Orders vs Requests по датам заказа", "combo_processed": "Обработано (Sent + Already)",
         "cov_note": "ℹ️ Запрос можно отправить только когда заказу 5–30 дней. Свежие даты (моложе ~8 дней) показывают ⏳ Зреет — это норма: покрытие там ещё невозможно. 🔴 Низкое покрытие отмечает даты с уже прошедшим окном, где стоит дослать запросы. Увеличение частоты отправки это НЕ ускорит.",
-        "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна", "cov_total": "▦ ИТОГО",
+        "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна", "cov_total": "▦ ИТОГО", "cov_total_note": "только дозревшие даты (без ⏳)",
         "cov_leg_maturing": "заказ слишком свежий — ждём окно отправки",
         "guide_title": "📖 Инструкция: как пользоваться этим монитором",
         "missed_title": "💸 Упущенные заказы (потерянные отзывы)",
@@ -795,17 +795,29 @@ def render_review_page(get_engine, T_main, theme, lang):
             disp = disp[['day', 'orders', 'sent', 'already', 'errors',
                          'coverage', 'unprocessed', 'status', 'comment']]
 
-            # 🆕 ИТОГОВАЯ строка (covered/orders, а не среднее по дням)
-            t_orders = int(disp['orders'].sum())
-            t_sent   = int(disp['sent'].sum())
-            t_alr    = int(disp['already'].sum())
-            t_err    = int(disp['errors'].sum())
-            t_unproc = int(disp['unprocessed'].sum())
+            # 🆕 ИТОГОВАЯ строка — считаем ТОЛЬКО дозревшие даты (без ⏳ «Зреет»),
+            #    иначе нули незрелых дней занижают общий % (60% вместо реальных ~96%).
+            matured = disp[~disp['status'].str.startswith("⏳")]
+            t_orders = int(matured['orders'].sum())
+            t_sent   = int(matured['sent'].sum())
+            t_alr    = int(matured['already'].sum())
+            t_err    = int(matured['errors'].sum())
+            t_unproc = int(matured['unprocessed'].sum())
             t_cov    = round((t_sent + t_alr) / t_orders * 100, 1) if t_orders else 0.0
+
+            # 🆕 ПЛАШКА с итоговыми KPI над таблицей
+            p1, p2, p3, p4, p5 = st.columns(5)
+            p1.metric(R['cov_orders'],  f"{t_orders:,}")
+            p2.metric(R['cov_sent'],    f"{t_sent:,}")
+            p3.metric(R['cov_pct'],     f"{t_cov:.1f}%")
+            p4.metric(R['cov_unproc'],  f"{t_unproc:,}")
+            p5.metric(R['cov_errors'],  f"{t_err:,}", delta_color="inverse")
+            st.caption(R['cov_total_note'])
+
             total_row = pd.DataFrame([{
                 'day': R['cov_total'], 'orders': t_orders, 'sent': t_sent,
                 'already': t_alr, 'errors': t_err, 'coverage': t_cov,
-                'unprocessed': t_unproc, 'status': '', 'comment': '',
+                'unprocessed': t_unproc, 'status': '', 'comment': R['cov_total_note'],
             }])
             disp = pd.concat([total_row, disp], ignore_index=True)
 
@@ -820,12 +832,19 @@ def render_review_page(get_engine, T_main, theme, lang):
                 'status':      R['cov_status'],
                 'comment':     R['cov_comment'],
             })
+
+            # 🆕 підсвічуємо рядок ИТОГО (перший) фоном + жирним
+            is_light = theme['bg'] == "#f5f7fa"
+            hl_bg = "#dbe4ff" if is_light else "#2d3561"
+            def _hl_total(row):
+                if row.name == 0:   # перший рядок = ИТОГО
+                    return [f'background-color: {hl_bg}; font-weight: 700;'] * len(row)
+                return [''] * len(row)
+            styler = disp.style.apply(_hl_total, axis=1).format({R['cov_pct']: "{:.1f}%"})
+
             st.dataframe(
-                disp, use_container_width=True, hide_index=True,
+                styler, use_container_width=True, hide_index=True,
                 height=max(320, 36 * min(len(disp), 16)),
-                column_config={
-                    R['cov_pct']: st.column_config.NumberColumn(format="%.1f%%"),
-                },
             )
 
         with cR:
@@ -1087,4 +1106,4 @@ def render_review_page(get_engine, T_main, theme, lang):
                 )
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
-                    st.warning(R['risk_warn'].format(n=n_red)) 
+                    st.warning(R['risk_warn'].format(n=n_red))
