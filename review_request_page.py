@@ -96,16 +96,16 @@ REVIEW_TRANSLATIONS = {
         "cov_date": "Order date", "cov_orders": "Orders", "cov_sent": "Requests sent",
         "cov_errors": "Errors", "cov_pct": "Coverage %", "cov_unproc": "Unprocessed",
         "cov_status": "Status", "cov_comment": "Comment",
-        "cov_warn_lbl": "Attention", "cov_prob_lbl": "Low coverage",
+        "cov_warn_lbl": "Attention", "cov_prob_lbl": "Missed", "cov_progress_lbl": "In progress", "cov_c_progress": "Window still open — catching up", "cov_leg_prog2": "Below target, but the 5–30 day window is still open. Requests are being sent automatically — these will be covered. Not a loss.",
         "cov_legend": "Status legend",
         "cov_leg_ok": "coverage at target", "cov_leg_warn": "coverage below target",
-        "cov_leg_prob": "coverage below the target", "cov_about": "About the calculation", "cov_leg_ok2": "All good — requests went out, nothing to do.", "cov_leg_prob2": "Below target. For dates still within the 30-day window the requests will be sent automatically on the next run. For dates older than 30 days the window has closed and reviews are lost (see Missed orders).", "cov_leg_mat2": "Order is too fresh (under ~8 days) — the 5–30 day window hasn't opened yet. Normal, will be covered automatically.",
+        "cov_leg_prob": "coverage below the target", "cov_about": "About the calculation", "cov_leg_ok2": "All good — requests went out, nothing to do.", "cov_leg_prob2": "The 5–30 day window has CLOSED and coverage stayed low — these reviews are lost for good. This is the only status that is a real problem.", "cov_leg_mat2": "Order is too fresh (under ~8 days) — the 5–30 day window hasn't opened yet. Normal, will be covered automatically.",
         "cov_c_high": "High coverage", "cov_c_norm": "Within norm",
         "cov_c_below": "Coverage below target", "cov_c_crit": "Coverage below target — resend requests",
         "flt_period": "📅 Order period", "flt_threshold": "Coverage threshold", "flt_status": "Status",
         "flt_all": "All", "kpi_orders": "🛒 Orders in period",
         "combo_title": "📊 Orders vs Requests by order date", "combo_processed": "Processed (Sent + Already)",
-        "cov_note": "ℹ️ Requests can only be sent when an order is 5–30 days old. Recent dates (under ~8 days) show ⏳ Maturing — that's normal: coverage there isn't possible yet. 🔴 Low coverage marks dates whose window has already passed where requests should be resent. Increasing send frequency won't speed this up.",
+        "cov_note": "ℹ️ Requests can only be sent when an order is 5–30 days old. Recent dates (under ~8 days) show ⏳ Maturing — that's normal: coverage there isn't possible yet. 🟠 In progress — window open, the system is still catching up (not a loss). 🔴 Missed — window closed, reviews are lost. Sending more often won't speed this up.",
         "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window", "cov_total": "▦ TOTAL", "cov_total_note": "matured dates only (excl. ⏳)",
         "cov_leg_maturing": "order too recent — wait for the send window",
         "guide_title": "📖 Guide: how to use this monitor",
@@ -193,16 +193,16 @@ Amazon only allows a request when an order is 5–30 days old. Recent orders are
         "cov_date": "Дата замовлення", "cov_orders": "Orders", "cov_sent": "Requests sent",
         "cov_errors": "Errors", "cov_pct": "Coverage %", "cov_unproc": "Не оброблено",
         "cov_status": "Статус", "cov_comment": "Коментар",
-        "cov_warn_lbl": "Увага", "cov_prob_lbl": "Низьке покриття",
+        "cov_warn_lbl": "Увага", "cov_prob_lbl": "Упущено", "cov_progress_lbl": "В роботі", "cov_c_progress": "Вікно ще відкрите — доганяємо", "cov_leg_prog2": "Нижче цілі, але вікно 5–30 днів ще відкрите. Запити дошлються автоматично — ці дати покриються. Це НЕ втрата.",
         "cov_legend": "Легенда статусів",
         "cov_leg_ok": "покриття на цільовому рівні", "cov_leg_warn": "покриття нижче цілі",
-        "cov_leg_prob": "покриття нижче цілі", "cov_about": "Про розрахунок покриття", "cov_leg_ok2": "Усе добре — запити пішли, нічого робити не треба.", "cov_leg_prob2": "Нижче цілі. Для дат у межах 30 днів запити дошлються автоматично наступного прогону. Для дат, старших за 30 днів, вікно закрилось — відгуки втрачені (див. Упущені).", "cov_leg_mat2": "Замовлення надто свіже (молодше ~8 днів) — вікно 5–30 днів ще не відкрилось. Це норма, покриється автоматично.",
+        "cov_leg_prob": "покриття нижче цілі", "cov_about": "Про розрахунок покриття", "cov_leg_ok2": "Усе добре — запити пішли, нічого робити не треба.", "cov_leg_prob2": "Вікно 5–30 днів ЗАКРИЛОСЬ, а покриття лишилось низьким — ці відгуки втрачені назавжди. Це єдиний статус, що є реальною проблемою.", "cov_leg_mat2": "Замовлення надто свіже (молодше ~8 днів) — вікно 5–30 днів ще не відкрилось. Це норма, покриється автоматично.",
         "cov_c_high": "Високе покриття", "cov_c_norm": "У межах норми",
         "cov_c_below": "Покриття нижче цілі", "cov_c_crit": "Покриття нижче цілі — дослати запити",
         "flt_period": "📅 Період замовлення", "flt_threshold": "Поріг покриття", "flt_status": "Статус",
         "flt_all": "Усі", "kpi_orders": "🛒 Orders у періоді",
         "combo_title": "📊 Orders vs Requests по датах замовлення", "combo_processed": "Оброблено (Sent + Already)",
-        "cov_note": "ℹ️ Запит можна відправити лише коли замовленню 5–30 днів. Свіжі дати (молодші ~8 днів) показують ⏳ Зріє — це норма: покриття там ще неможливе. 🔴 Низьке покриття позначає дати з уже минулим вікном, де варто дослати запити. Збільшення частоти відправки це НЕ прискорить.",
+        "cov_note": "ℹ️ Запит можна відправити лише коли замовленню 5–30 днів. Свіжі дати (молодші ~8 днів) показують ⏳ Зріє — це норма: покриття там ще неможливе. 🟠 В роботі — вікно відкрите, система ще доганяє (не втрата). 🔴 Упущено — вікно закрилось, відгуки втрачені. Збільшення частоти відправки нічого не прискорить.",
         "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна", "cov_total": "▦ РАЗОМ", "cov_total_note": "лише дозрілі дати (без ⏳)",
         "cov_leg_maturing": "замовлення надто свіже — чекаємо вікно відправки",
         "guide_title": "📖 Інструкція: як користуватися цим монітором",
@@ -290,16 +290,16 @@ Amazon дозволяє надіслати запит лише коли замо
         "cov_date": "Дата заказа", "cov_orders": "Orders", "cov_sent": "Requests sent",
         "cov_errors": "Errors", "cov_pct": "Coverage %", "cov_unproc": "Не обработано",
         "cov_status": "Статус", "cov_comment": "Комментарий",
-        "cov_warn_lbl": "Внимание", "cov_prob_lbl": "Низкое покрытие",
+        "cov_warn_lbl": "Внимание", "cov_prob_lbl": "Упущено", "cov_progress_lbl": "В работе", "cov_c_progress": "Окно ещё открыто — догоняем", "cov_leg_prog2": "Ниже цели, но окно 5–30 дней ещё открыто. Запросы дошлются автоматически — эти даты покроются. Это НЕ потеря.",
         "cov_legend": "Легенда статусов",
         "cov_leg_ok": "покрытие на целевом уровне", "cov_leg_warn": "покрытие ниже цели",
-        "cov_leg_prob": "покрытие ниже цели", "cov_about": "О расчёте покрытия", "cov_leg_ok2": "Всё хорошо — запросы ушли, делать ничего не нужно.", "cov_leg_prob2": "Ниже цели. Для дат в пределах 30 дней запросы дошлются автоматически в следующем прогоне. Для дат старше 30 дней окно закрылось — отзывы потеряны (см. Упущенные).", "cov_leg_mat2": "Заказ слишком свежий (моложе ~8 дней) — окно 5–30 дней ещё не открылось. Это норма, покроется автоматически.",
+        "cov_leg_prob": "покрытие ниже цели", "cov_about": "О расчёте покрытия", "cov_leg_ok2": "Всё хорошо — запросы ушли, делать ничего не нужно.", "cov_leg_prob2": "Окно 5–30 дней ЗАКРЫЛОСЬ, а покрытие осталось низким — эти отзывы потеряны навсегда. Это единственный статус, который реальная проблема.", "cov_leg_mat2": "Заказ слишком свежий (моложе ~8 дней) — окно 5–30 дней ещё не открылось. Это норма, покроется автоматически.",
         "cov_c_high": "Высокое покрытие", "cov_c_norm": "В пределах нормы",
         "cov_c_below": "Покрытие ниже цели", "cov_c_crit": "Покрытие ниже цели — дослать запросы",
         "flt_period": "📅 Период заказа", "flt_threshold": "Порог покрытия", "flt_status": "Статус",
         "flt_all": "Все", "kpi_orders": "🛒 Orders в периоде",
         "combo_title": "📊 Orders vs Requests по датам заказа", "combo_processed": "Обработано (Sent + Already)",
-        "cov_note": "ℹ️ Запрос можно отправить только когда заказу 5–30 дней. Свежие даты (моложе ~8 дней) показывают ⏳ Зреет — это норма: покрытие там ещё невозможно. 🔴 Низкое покрытие отмечает даты с уже прошедшим окном, где стоит дослать запросы. Увеличение частоты отправки это НЕ ускорит.",
+        "cov_note": "ℹ️ Запрос можно отправить только когда заказу 5–30 дней. Свежие даты (моложе ~8 дней) показывают ⏳ Зреет — это норма: покрытие там ещё невозможно. 🟠 В работе — окно открыто, система ещё догоняет (не потеря). 🔴 Упущено — окно закрылось, отзывы потеряны. Увеличение частоты отправки ничего не ускорит.",
         "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна", "cov_total": "▦ ИТОГО", "cov_total_note": "только дозревшие даты (без ⏳)",
         "cov_leg_maturing": "заказ слишком свежий — ждём окно отправки",
         "guide_title": "📖 Инструкция: как пользоваться этим монитором",
@@ -695,7 +695,7 @@ def render_review_page(get_engine, T_main, theme, lang):
     with fc:
         status_opt = st.selectbox(
             R['flt_status'],
-            [R['flt_all'], "🟢 OK",
+            [R['flt_all'], "🟢 OK", "🟠 " + R['cov_progress_lbl'],
              "🔴 " + R['cov_prob_lbl'], "⏳ " + R['cov_maturing']],
         )
 
@@ -769,7 +769,13 @@ def render_review_page(get_engine, T_main, theme, lang):
                     return "⏳ " + R['cov_maturing']
                 if c is None or pd.isna(c):
                     return "⚪ —"
-                if c >= threshold:    return "🟢 OK"
+                if c >= threshold:
+                    return "🟢 OK"
+                # покриття нижче цілі:
+                #  - вікно ще ВІДКРИТЕ (<=30 днів) → ще доженемо, це НЕ втрата
+                #  - вікно ЗАКРИТЕ (>30 днів) → відгуки втрачені назавжди
+                if age <= 30:
+                    return "🟠 " + R['cov_progress_lbl']
                 return "🔴 " + R['cov_prob_lbl']
             disp['status'] = disp.apply(_status, axis=1)
 
@@ -777,12 +783,13 @@ def render_review_page(get_engine, T_main, theme, lang):
                 c = row['coverage']
                 age = row['age_days']
                 if age < 8:
-                    return R['cov_c_maturing']   # ще у вікні / не дозріло
+                    return R['cov_c_maturing']
                 if c is None or pd.isna(c):
                     return "—"
                 if c >= 95:         return R['cov_c_high']
                 if c >= threshold:  return R['cov_c_norm']
-                return R['cov_c_crit']
+                if age <= 30:       return R['cov_c_progress']   # ще доженемо
+                return R['cov_c_crit']                          # вікно закрите — втрата
             disp['comment'] = disp.apply(_comment, axis=1)
 
             # 🆕 фільтр по статусу
@@ -851,7 +858,9 @@ def render_review_page(get_engine, T_main, theme, lang):
             st.markdown(
                 f"🟢 **OK** (≥{threshold}%)\n\n"
                 f"<span style='opacity:.75'>{R['cov_leg_ok2']}</span>\n\n"
-                f"🔴 **{R['cov_prob_lbl']}** (<{threshold}%)\n\n"
+                f"🟠 **{R['cov_progress_lbl']}**\n\n"
+                f"<span style='opacity:.75'>{R['cov_leg_prog2']}</span>\n\n"
+                f"🔴 **{R['cov_prob_lbl']}**\n\n"
                 f"<span style='opacity:.75'>{R['cov_leg_prob2']}</span>\n\n"
                 f"⏳ **{R['cov_maturing']}**\n\n"
                 f"<span style='opacity:.75'>{R['cov_leg_mat2']}</span>",
