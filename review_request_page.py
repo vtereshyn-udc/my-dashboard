@@ -106,12 +106,12 @@ REVIEW_TRANSLATIONS = {
         "flt_all": "All", "kpi_orders": "🛒 Orders in period",
         "combo_title": "📊 Orders vs Requests by order date", "combo_processed": "Processed (Sent + Already)",
         "cov_note": "ℹ️ Requests can only be sent when an order is 5–30 days old. Recent dates (under ~8 days) show ⏳ Maturing — that's normal: coverage there isn't possible yet. 🔴 Low coverage marks dates whose window has already passed where requests should be resent. Increasing send frequency won't speed this up.",
-        "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window",
+        "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window", "cov_total": "▦ TOTAL",
         "cov_leg_maturing": "order too recent — wait for the send window",
         "guide_title": "📖 Guide: how to use this monitor",
         "missed_title": "💸 Missed orders (lost reviews)",
         "missed_sub": "Orders whose 5–30 day window has fully passed with NO request sent — permanently lost review chances.",
-        "missed_lbl": "Missed", "missed_total": "Missed (last 30 matured days)", "missed_pct": "{pct:.1f}% of orders in that window",
+        "missed_lbl": "Missed", "missed_total": "Missed (lost)", "missed_pct_lbl": "% of orders", "missed_note": "Counted only over days when the system was active (pre-launch days are greyed out).",
         "missed_none": "✅ No missed orders — the window is fully covered.",
         "heat_title": "🗓️ Coverage heatmap (weekday × week)",
         "heat_sub": "Coverage % by day. Spot weak spots — e.g. weekends or specific days dropping.",
@@ -203,12 +203,12 @@ Amazon only allows a request when an order is 5–30 days old. Recent orders are
         "flt_all": "Усі", "kpi_orders": "🛒 Orders у періоді",
         "combo_title": "📊 Orders vs Requests по датах замовлення", "combo_processed": "Оброблено (Sent + Already)",
         "cov_note": "ℹ️ Запит можна відправити лише коли замовленню 5–30 днів. Свіжі дати (молодші ~8 днів) показують ⏳ Зріє — це норма: покриття там ще неможливе. 🔴 Низьке покриття позначає дати з уже минулим вікном, де варто дослати запити. Збільшення частоти відправки це НЕ прискорить.",
-        "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна",
+        "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна", "cov_total": "▦ РАЗОМ",
         "cov_leg_maturing": "замовлення надто свіже — чекаємо вікно відправки",
         "guide_title": "📖 Інструкція: як користуватися цим монітором",
         "missed_title": "💸 Упущені замовлення (втрачені відгуки)",
         "missed_sub": "Замовлення, у яких вікно 5–30 днів повністю минуло БЕЗ відправки запиту — безповоротно втрачені шанси на відгук.",
-        "missed_lbl": "Упущено", "missed_total": "Упущено (останні 30 дозрілих днів)", "missed_pct": "{pct:.1f}% замовлень за цей період",
+        "missed_lbl": "Упущено", "missed_total": "Упущено (втрачено)", "missed_pct_lbl": "% замовлень", "missed_note": "Рахується лише по днях, коли система працювала (доба до запуску — сірим).",
         "missed_none": "✅ Упущених немає — вікно повністю покрите.",
         "heat_title": "🗓️ Heatmap покриття (день × тиждень)",
         "heat_sub": "% покриття по днях. Лови слабкі місця — напр. вихідні чи певні дні просідають.",
@@ -300,12 +300,12 @@ Amazon дозволяє надіслати запит лише коли замо
         "flt_all": "Все", "kpi_orders": "🛒 Orders в периоде",
         "combo_title": "📊 Orders vs Requests по датам заказа", "combo_processed": "Обработано (Sent + Already)",
         "cov_note": "ℹ️ Запрос можно отправить только когда заказу 5–30 дней. Свежие даты (моложе ~8 дней) показывают ⏳ Зреет — это норма: покрытие там ещё невозможно. 🔴 Низкое покрытие отмечает даты с уже прошедшим окном, где стоит дослать запросы. Увеличение частоты отправки это НЕ ускорит.",
-        "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна",
+        "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна", "cov_total": "▦ ИТОГО",
         "cov_leg_maturing": "заказ слишком свежий — ждём окно отправки",
         "guide_title": "📖 Инструкция: как пользоваться этим монитором",
         "missed_title": "💸 Упущенные заказы (потерянные отзывы)",
         "missed_sub": "Заказы, у которых окно 5–30 дней полностью прошло БЕЗ отправки запроса — безвозвратно потерянные шансы на отзыв.",
-        "missed_lbl": "Упущено", "missed_total": "Упущено (последние 30 дозревших дней)", "missed_pct": "{pct:.1f}% заказов за этот период",
+        "missed_lbl": "Упущено", "missed_total": "Упущено (потеряно)", "missed_pct_lbl": "% заказов", "missed_note": "Считается только по дням, когда система работала (дни до запуска — серым).",
         "missed_none": "✅ Упущенных нет — окно полностью покрыто.",
         "heat_title": "🗓️ Heatmap покрытия (день × неделя)",
         "heat_sub": "% покрытия по дням. Лови слабые места — напр. выходные или отдельные дни проседают.",
@@ -422,8 +422,10 @@ def _load_missed(_engine, days_back: int = 60) -> pd.DataFrame:
     """
     🆕 #2 УПУЩЕНІ замовлення: вікно (5-30 днів) ВЖЕ МИНУЛО,
     а запит так і не пішов (немає sent/already в логу).
-    Це безповоротно втрачені відгуки.
-    Рахуємо по даті замовлення для замовлень старших за 30 днів.
+
+    'has_activity' = чи система ВЗАГАЛІ працювала по цьому дню (були спроби
+    sent/already/outside/failed). Якщо 0 активності — це доба ДО запуску
+    системи, її НЕ рахуємо в чесний підсумок втрат.
     """
     q = text("""
         SELECT o.purchase_date::date AS day,
@@ -434,8 +436,11 @@ def _load_missed(_engine, days_back: int = 60) -> pd.DataFrame:
                        WHERE l.amazon_order_id = o.amazon_order_id
                          AND l.status IN ('sent','already_reviewed')
                    )
-               ) AS missed
+               ) AS missed,
+               COUNT(DISTINCT l2.amazon_order_id) AS any_activity
         FROM spapi.all_orders o
+        LEFT JOIN public.review_request_log l2
+               ON l2.amazon_order_id = o.amazon_order_id
         WHERE o.order_status = 'Shipped'
           AND o.purchase_date::date <  NOW()::date - INTERVAL '30 days'
           AND o.purchase_date::date >= NOW()::date - (:days || ' days')::interval
@@ -789,6 +794,21 @@ def render_review_page(get_engine, T_main, theme, lang):
             disp['day'] = pd.to_datetime(disp['day']).dt.strftime('%d.%m.%Y')
             disp = disp[['day', 'orders', 'sent', 'already', 'errors',
                          'coverage', 'unprocessed', 'status', 'comment']]
+
+            # 🆕 ИТОГОВАЯ строка (covered/orders, а не среднее по дням)
+            t_orders = int(disp['orders'].sum())
+            t_sent   = int(disp['sent'].sum())
+            t_alr    = int(disp['already'].sum())
+            t_err    = int(disp['errors'].sum())
+            t_unproc = int(disp['unprocessed'].sum())
+            t_cov    = round((t_sent + t_alr) / t_orders * 100, 1) if t_orders else 0.0
+            total_row = pd.DataFrame([{
+                'day': R['cov_total'], 'orders': t_orders, 'sent': t_sent,
+                'already': t_alr, 'errors': t_err, 'coverage': t_cov,
+                'unprocessed': t_unproc, 'status': '', 'comment': '',
+            }])
+            disp = pd.concat([total_row, disp], ignore_index=True)
+
             disp = disp.rename(columns={
                 'day':         R['cov_date'],
                 'orders':      R['cov_orders'],
@@ -837,9 +857,13 @@ def render_review_page(get_engine, T_main, theme, lang):
             md = missed.copy()
             md['day_dt'] = pd.to_datetime(md['day'])
             md['day'] = md['day_dt'].dt.strftime('%d.%m')
+            # 🆕 день вважається «робочим», якщо система мала хоч якусь активність
+            md['active'] = md['any_activity'] > 0
+            bar_colors = ['#e8590c' if a else '#adb5bd' for a in md['active']]
+
             figm = go.Figure()
             figm.add_trace(go.Bar(x=md['day'], y=md['missed'],
-                                  marker_color='#e8590c', name=R['missed_lbl']))
+                                  marker_color=bar_colors, name=R['missed_lbl']))
             figm.update_layout(
                 height=320, template=theme['template'],
                 paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
@@ -848,15 +872,15 @@ def render_review_page(get_engine, T_main, theme, lang):
             figm.update_yaxes(gridcolor=theme['grid'])
             st.plotly_chart(figm, use_container_width=True)
 
-            # 🆕 ЧЕСНИЙ ітог: тільки останні 30 дозрілих днів (без долайнч-хвоста)
-            cutoff = pd.Timestamp(datetime.now().date()) - timedelta(days=60)
-            recent = md[md['day_dt'] >= cutoff]
-            total_missed = int(recent['missed'].sum())
-            total_ord    = int(recent['orders'].sum())
+            # 🆕 ЧЕСНИЙ ітог: лише дні, коли система ПРАЦЮВАЛА (active)
+            act = md[md['active']]
+            total_missed = int(act['missed'].sum())
+            total_ord    = int(act['orders'].sum())
             pct = (total_missed / total_ord * 100) if total_ord else 0
-            # без стрілки-дельти (порівнювати немає з чим) — % як підпис
-            st.metric(R['missed_total'], f"{total_missed:,}")
-            st.caption(R['missed_pct'].format(pct=pct))
+            mm1, mm2 = st.columns(2)
+            mm1.metric(R['missed_total'], f"{total_missed:,}")
+            mm2.metric(R['missed_pct_lbl'], f"{pct:.1f}%")
+            st.caption(R['missed_note'])
         else:
             st.success(R['missed_none'])
 
