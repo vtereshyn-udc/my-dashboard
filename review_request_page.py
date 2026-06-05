@@ -111,7 +111,7 @@ REVIEW_TRANSLATIONS = {
         "guide_title": "📖 Guide: how to use this monitor",
         "missed_title": "💸 Missed orders (lost reviews)",
         "missed_sub": "Orders whose 5–30 day window has fully passed with NO request sent — permanently lost review chances.",
-        "missed_lbl": "Missed", "missed_total": "Total missed (30d)",
+        "missed_lbl": "Missed", "missed_total": "Missed (last 30 matured days)", "missed_pct": "{pct:.1f}% of orders in that window",
         "missed_none": "✅ No missed orders — the window is fully covered.",
         "heat_title": "🗓️ Coverage heatmap (weekday × week)",
         "heat_sub": "Coverage % by day. Spot weak spots — e.g. weekends or specific days dropping.",
@@ -208,7 +208,7 @@ Amazon only allows a request when an order is 5–30 days old. Recent orders are
         "guide_title": "📖 Інструкція: як користуватися цим монітором",
         "missed_title": "💸 Упущені замовлення (втрачені відгуки)",
         "missed_sub": "Замовлення, у яких вікно 5–30 днів повністю минуло БЕЗ відправки запиту — безповоротно втрачені шанси на відгук.",
-        "missed_lbl": "Упущено", "missed_total": "Усього упущено (30д)",
+        "missed_lbl": "Упущено", "missed_total": "Упущено (останні 30 дозрілих днів)", "missed_pct": "{pct:.1f}% замовлень за цей період",
         "missed_none": "✅ Упущених немає — вікно повністю покрите.",
         "heat_title": "🗓️ Heatmap покриття (день × тиждень)",
         "heat_sub": "% покриття по днях. Лови слабкі місця — напр. вихідні чи певні дні просідають.",
@@ -305,7 +305,7 @@ Amazon дозволяє надіслати запит лише коли замо
         "guide_title": "📖 Инструкция: как пользоваться этим монитором",
         "missed_title": "💸 Упущенные заказы (потерянные отзывы)",
         "missed_sub": "Заказы, у которых окно 5–30 дней полностью прошло БЕЗ отправки запроса — безвозвратно потерянные шансы на отзыв.",
-        "missed_lbl": "Упущено", "missed_total": "Всего упущено (30д)",
+        "missed_lbl": "Упущено", "missed_total": "Упущено (последние 30 дозревших дней)", "missed_pct": "{pct:.1f}% заказов за этот период",
         "missed_none": "✅ Упущенных нет — окно полностью покрыто.",
         "heat_title": "🗓️ Heatmap покрытия (день × неделя)",
         "heat_sub": "% покрытия по дням. Лови слабые места — напр. выходные или отдельные дни проседают.",
@@ -835,7 +835,8 @@ def render_review_page(get_engine, T_main, theme, lang):
         st.caption(R['missed_sub'])
         if not missed.empty and missed['missed'].sum() > 0:
             md = missed.copy()
-            md['day'] = pd.to_datetime(md['day']).dt.strftime('%d.%m')
+            md['day_dt'] = pd.to_datetime(md['day'])
+            md['day'] = md['day_dt'].dt.strftime('%d.%m')
             figm = go.Figure()
             figm.add_trace(go.Bar(x=md['day'], y=md['missed'],
                                   marker_color='#e8590c', name=R['missed_lbl']))
@@ -846,11 +847,16 @@ def render_review_page(get_engine, T_main, theme, lang):
             figm.update_xaxes(gridcolor=theme['grid'])
             figm.update_yaxes(gridcolor=theme['grid'])
             st.plotly_chart(figm, use_container_width=True)
-            total_missed = int(missed['missed'].sum())
-            total_ord    = int(missed['orders'].sum())
+
+            # 🆕 ЧЕСНИЙ ітог: тільки останні 30 дозрілих днів (без долайнч-хвоста)
+            cutoff = pd.Timestamp(datetime.now().date()) - timedelta(days=60)
+            recent = md[md['day_dt'] >= cutoff]
+            total_missed = int(recent['missed'].sum())
+            total_ord    = int(recent['orders'].sum())
             pct = (total_missed / total_ord * 100) if total_ord else 0
-            st.metric(R['missed_total'], f"{total_missed:,}", delta=f"{pct:.1f}%",
-                      delta_color="inverse")
+            # без стрілки-дельти (порівнювати немає з чим) — % як підпис
+            st.metric(R['missed_total'], f"{total_missed:,}")
+            st.caption(R['missed_pct'].format(pct=pct))
         else:
             st.success(R['missed_none'])
 
