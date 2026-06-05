@@ -1063,4 +1063,4 @@ def render_review_page(get_engine, T_main, theme, lang):
                 )
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
-                    st.warning(R['risk_warn'].format(n=n_red))
+                    st.warning(R['risk_warn'].format(n=n_red)) 
