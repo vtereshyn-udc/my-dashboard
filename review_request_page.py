@@ -833,12 +833,13 @@ def render_review_page(get_engine, T_main, theme, lang):
                 'comment':     R['cov_comment'],
             })
 
-            # 🆕 підсвічуємо рядок ИТОГО (перший) фоном + жирним
+            # 🆕 підсвічуємо рядок ИТОГО (перший) фоном + жирним + контрастний текст
             is_light = theme['bg'] == "#f5f7fa"
-            hl_bg = "#dbe4ff" if is_light else "#2d3561"
+            hl_bg   = "#dbe4ff" if is_light else "#3b4a82"
+            hl_text = "#1e293b" if is_light else "#ffffff"
             def _hl_total(row):
                 if row.name == 0:   # перший рядок = ИТОГО
-                    return [f'background-color: {hl_bg}; font-weight: 700;'] * len(row)
+                    return [f'background-color: {hl_bg}; color: {hl_text}; font-weight: 700;'] * len(row)
                 return [''] * len(row)
             styler = disp.style.apply(_hl_total, axis=1).format({R['cov_pct']: "{:.1f}%"})
 
