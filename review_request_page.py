@@ -108,6 +108,36 @@ REVIEW_TRANSLATIONS = {
         "cov_note": "ℹ️ Requests can only be sent when an order is 5–30 days old. Recent dates (under ~8 days) show ⏳ Maturing — that's normal: coverage there isn't possible yet. 🔴 Low coverage marks dates whose window has already passed where requests should be resent. Increasing send frequency won't speed this up.",
         "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window",
         "cov_leg_maturing": "order too recent — wait for the send window",
+        "guide_title": "📖 Guide: how to use this monitor",
+        "guide_md": """
+**What this page is**
+
+A monitor for the automated review-request mailing (Amazon "Request a Review"). The system sends requests once a day for eligible orders. This page shows how it's doing.
+
+**The 5–30 day window rule**
+
+Amazon only allows a request when an order is 5–30 days old. Recent orders aren't processed yet — that's normal, they're "maturing".
+
+**Reading the blocks top to bottom:**
+
+1. **Filters** — order period, coverage threshold, status filter.
+2. **KPI cards** — period summary: orders, sent, already, coverage %, errors.
+3. **Orders vs Requests** — blue bars = all orders, teal = processed, purple line = coverage %. Dotted = threshold.
+4. **Coverage control** — table by order date. Statuses:
+   - 🟢 **OK** (≥90%) — coverage on target.
+   - 🟡 **Attention** — slightly below target.
+   - 🔴 **Low coverage** — window passed but coverage low → look into it / resend.
+   - ⏳ **Maturing** — order too recent, coverage not possible yet. Normal.
+5. **Daily volume** — sends by status, by send date.
+6. **By ASIN** — which products got requests (7/14/30 days) + Amazon links.
+7. **Safety signal** — top negative topic per ASIN.
+
+**FAQ:**
+
+- *Why are recent dates red/zero?* — Orders aren't in the 5–30 day window yet. They'll turn green on their own.
+- *Should I send more than once a day?* — No. Orders can't be processed before the window regardless.
+- *Is "Already" bad?* — No. The request was sent earlier; Amazon declined the duplicate. Normal.
+""",
     },
     "UA": {
         "nav_label": "🧭 Сторінка",
@@ -167,6 +197,36 @@ REVIEW_TRANSLATIONS = {
         "cov_note": "ℹ️ Запит можна відправити лише коли замовленню 5–30 днів. Свіжі дати (молодші ~8 днів) показують ⏳ Зріє — це норма: покриття там ще неможливе. 🔴 Низьке покриття позначає дати з уже минулим вікном, де варто дослати запити. Збільшення частоти відправки це НЕ прискорить.",
         "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна",
         "cov_leg_maturing": "замовлення надто свіже — чекаємо вікно відправки",
+        "guide_title": "📖 Інструкція: як користуватися цим монітором",
+        "guide_md": """
+**Що це за сторінка**
+
+Це монітор автоматичної розсилки запитів на відгук (Amazon «Request a Review»). Система раз на день сама надсилає покупцям запити по підходящих замовленнях. Тут видно, як вона працює.
+
+**Головне правило вікна 5–30 днів**
+
+Amazon дозволяє надіслати запит лише коли замовленню від 5 до 30 днів. Раніше не можна, пізніше — пізно. Тому свіжі замовлення ще не оброблені — це норма, вони «зріють».
+
+**Як читати блоки згори вниз:**
+
+1. **Фільтри** — період замовлення, поріг покриття і фільтр за статусом.
+2. **KPI-картки** — зведення за період: замовлень, надіслано, already, % покриття, помилок.
+3. **Orders vs Requests** — сині стовпчики це всі замовлення, бірюзові — оброблені, фіолетова лінія — % покриття. Пунктир — твій поріг.
+4. **Контроль покриття** — таблиця по датах замовлення. Статуси:
+   - 🟢 **OK** (≥90%) — покриття в нормі.
+   - 🟡 **Увага** — трохи нижче цілі.
+   - 🔴 **Низьке покриття** — вікно вже минуло, а покриття низьке → варто дослати.
+   - ⏳ **Зріє** — замовлення надто свіже, покриття ще неможливе. Це норма.
+5. **Обсяг по днях** — відправки по статусах за датою відправки.
+6. **По ASIN** — по яких товарах йшли запити (7/14/30 днів) + посилання на Amazon.
+7. **Захисний сигнал** — топова негативна тема по ASIN.
+
+**Часті питання:**
+
+- *Чому свіжі дати червоні/нульові?* — Замовлення ще не у вікні 5–30 днів. Зачекай — стануть зеленими.
+- *Чи треба слати частіше разу на день?* — Ні. До вікна замовлення все одно не обробити.
+- *Already — це погано?* — Ні. Запит уже слали раніше, Amazon відхилив дубль. Норма.
+""",
     },
     "RU": {
         "nav_label": "🧭 Страница",
@@ -226,6 +286,36 @@ REVIEW_TRANSLATIONS = {
         "cov_note": "ℹ️ Запрос можно отправить только когда заказу 5–30 дней. Свежие даты (моложе ~8 дней) показывают ⏳ Зреет — это норма: покрытие там ещё невозможно. 🔴 Низкое покрытие отмечает даты с уже прошедшим окном, где стоит дослать запросы. Увеличение частоты отправки это НЕ ускорит.",
         "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна",
         "cov_leg_maturing": "заказ слишком свежий — ждём окно отправки",
+        "guide_title": "📖 Инструкция: как пользоваться этим монитором",
+        "guide_md": """
+**Что это за страница**
+
+Это монитор автоматической рассылки запросов на отзыв (Amazon «Request a Review»). Система раз в день сама отправляет покупателям запросы на отзыв по подходящим заказам. Здесь видно, как она работает.
+
+**Главное правило окна 5–30 дней**
+
+Amazon разрешает отправлять запрос только когда заказу от 5 до 30 дней. Раньше нельзя, позже — поздно. Поэтому свежие заказы (последние ~дни) ещё не обработаны — это нормально, они «зреют».
+
+**Как читать блоки сверху вниз:**
+
+1. **Фильтры** — период заказа, порог покрытия и фильтр по статусу. Меняй период, чтобы смотреть нужный диапазон.
+2. **KPI-карточки** — сводка за выбранный период: заказов, отправлено, already, % покрытия, ошибок.
+3. **Orders vs Requests** — синие столбики это все заказы, бирюзовые — обработанные, фиолетовая линия — % покрытия. Пунктир — твой порог.
+4. **Контроль покрытия** — таблица по датам заказа. Статусы:
+   - 🟢 **OK** (≥90%) — покрытие в норме.
+   - 🟡 **Внимание** — покрытие чуть ниже цели.
+   - 🔴 **Низкое покрытие** — окно уже прошло, а покрытие низкое → стоит разобраться/дослать.
+   - ⏳ **Зреет** — заказ слишком свежий, покрытие ещё физически невозможно. Это норма, не ошибка.
+5. **Объём по дням** — отправки по статусам (sent / already / outside / failed) по дате отправки.
+6. **По ASIN** — по каким товарам шли запросы (переключатель 7/14/30 дней) + ссылки на Amazon.
+7. **Защитный сигнал** — топовая негативная тема по ASIN. Подсказывает, по каким товарам осторожнее с рассылкой.
+
+**Частые вопросы:**
+
+- *Почему свежие даты красные/нулевые?* — Заказы ещё не вошли в окно 5–30 дней. Подожди — станут зелёными сами.
+- *Надо ли слать чаще раза в день?* — Нет. Раньше окна заказ всё равно не обработать, частота ничего не ускорит.
+- *Already — это плохо?* — Нет. Значит запрос по заказу уже слали раньше, Amazon отклонил дубль. Это нормально.
+""",
     },
 }
 
@@ -812,3 +902,8 @@ def render_review_page(get_engine, T_main, theme, lang):
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
                     st.warning(R['risk_warn'].format(n=n_red))
+
+    # ---- 📖 ИНСТРУКЦИЯ (в самом низу) ----
+    st.divider()
+    with st.expander(R['guide_title']):
+        st.markdown(R['guide_md'])
