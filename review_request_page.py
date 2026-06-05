@@ -105,6 +105,9 @@ REVIEW_TRANSLATIONS = {
         "flt_period": "📅 Order period", "flt_threshold": "Coverage threshold", "flt_status": "Status",
         "flt_all": "All", "kpi_orders": "🛒 Orders in period",
         "combo_title": "📊 Orders vs Requests by order date", "combo_processed": "Processed (Sent + Already)",
+        "cov_note": "ℹ️ Requests can only be sent when an order is 5–30 days old. Recent dates (under ~8 days) show ⏳ Maturing — that's normal, not a failure: coverage there isn't possible yet. 🔴 Problem flags only real gaps in already-passed windows. Increasing send frequency won't speed this up.",
+        "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window",
+        "cov_leg_maturing": "order too recent — wait for the send window",
     },
     "UA": {
         "nav_label": "🧭 Сторінка",
@@ -161,6 +164,9 @@ REVIEW_TRANSLATIONS = {
         "flt_period": "📅 Період замовлення", "flt_threshold": "Поріг покриття", "flt_status": "Статус",
         "flt_all": "Усі", "kpi_orders": "🛒 Orders у періоді",
         "combo_title": "📊 Orders vs Requests по датах замовлення", "combo_processed": "Оброблено (Sent + Already)",
+        "cov_note": "ℹ️ Запит можна відправити лише коли замовленню 5–30 днів. Свіжі дати (молодші ~8 днів) показують ⏳ Зріє — це норма, а не провал: покриття там ще неможливе. 🔴 Проблема — лише реальні провали у вже минулому вікні. Збільшення частоти відправки це НЕ прискорить.",
+        "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна",
+        "cov_leg_maturing": "замовлення надто свіже — чекаємо вікно відправки",
     },
     "RU": {
         "nav_label": "🧭 Страница",
@@ -217,6 +223,9 @@ REVIEW_TRANSLATIONS = {
         "flt_period": "📅 Период заказа", "flt_threshold": "Порог покрытия", "flt_status": "Статус",
         "flt_all": "Все", "kpi_orders": "🛒 Orders в периоде",
         "combo_title": "📊 Orders vs Requests по датам заказа", "combo_processed": "Обработано (Sent + Already)",
+        "cov_note": "ℹ️ Запрос можно отправить только когда заказу 5–30 дней. Свежие даты (моложе ~8 дней) показывают ⏳ Зреет — это норма, а не провал: покрытие там ещё невозможно. 🔴 Проблема — только реальные провалы в уже прошедшем окне. Увеличение частоты отправки это НЕ ускорит.",
+        "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна",
+        "cov_leg_maturing": "заказ слишком свежий — ждём окно отправки",
     },
 }
 
@@ -491,7 +500,8 @@ def render_review_page(get_engine, T_main, theme, lang):
     with fc:
         status_opt = st.selectbox(
             R['flt_status'],
-            [R['flt_all'], "🟢 OK", "🟡 " + R['cov_warn_lbl'], "🔴 " + R['cov_prob_lbl']],
+            [R['flt_all'], "🟢 OK", "🟡 " + R['cov_warn_lbl'],
+             "🔴 " + R['cov_prob_lbl'], "⏳ " + R['cov_maturing']],
         )
 
     cov = _load_coverage(engine, d_from, d_to)
@@ -726,28 +736,41 @@ def render_review_page(get_engine, T_main, theme, lang):
     if not cov.empty:
         st.divider()
         st.markdown(f"### {R['cov_title']}")
+        st.info(R['cov_note'])
 
         cL, cR = st.columns([3, 1])
 
         with cL:
             disp = cov.copy()
+            # 🆕 вік замовлення в днях (вікно відправки Amazon = 5-30 днів)
+            today = pd.Timestamp(datetime.now().date())
+            disp['age_days'] = (today - pd.to_datetime(disp['day'])).dt.days
 
-            def _status(c):
+            def _status(row):
+                c = row['coverage']
+                age = row['age_days']
+                # дата ще не «дозріла»: молодша 8 днів → покриття фізично неможливе
+                if age < 8:
+                    return "⏳ " + R['cov_maturing']
                 if c is None or pd.isna(c):
                     return "⚪ —"
                 if c >= 90:           return "🟢 OK"
                 if c >= threshold:    return "🟡 " + R['cov_warn_lbl']
                 return "🔴 " + R['cov_prob_lbl']
-            disp['status'] = disp['coverage'].apply(_status)
+            disp['status'] = disp.apply(_status, axis=1)
 
-            def _comment(c):
+            def _comment(row):
+                c = row['coverage']
+                age = row['age_days']
+                if age < 8:
+                    return R['cov_c_maturing']   # ще у вікні / не дозріло
                 if c is None or pd.isna(c):
                     return "—"
                 if c >= 92:         return R['cov_c_high']
                 if c >= 90:         return R['cov_c_norm']
                 if c >= threshold:  return R['cov_c_below']
                 return R['cov_c_crit']
-            disp['comment'] = disp['coverage'].apply(_comment)
+            disp['comment'] = disp.apply(_comment, axis=1)
 
             # 🆕 фільтр по статусу
             if status_opt != R['flt_all']:
@@ -780,7 +803,8 @@ def render_review_page(get_engine, T_main, theme, lang):
             st.markdown(
                 f"🟢 **OK** (≥90%) — {R['cov_leg_ok']}\n\n"
                 f"🟡 **{R['cov_warn_lbl']}** ({threshold}–89.9%) — {R['cov_leg_warn']}\n\n"
-                f"🔴 **{R['cov_prob_lbl']}** (<{threshold}%) — {R['cov_leg_prob']}"
+                f"🔴 **{R['cov_prob_lbl']}** (<{threshold}%) — {R['cov_leg_prob']}\n\n"
+                f"⏳ **{R['cov_maturing']}** — {R['cov_leg_maturing']}"
             )
             st.caption(
                 f"**{R['cov_about']}**\n\n"
