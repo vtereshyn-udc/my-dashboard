@@ -553,6 +553,8 @@ def render_review_page(get_engine, T_main, theme, lang):
 
     st.markdown(f"## {R['title']}")
     st.caption(f"{R['sub']} · {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    with st.expander(R['guide_title']):
+        st.markdown(R['guide_md'])
     st.divider()
 
     with st.spinner(R['loading']):
@@ -902,8 +904,3 @@ def render_review_page(get_engine, T_main, theme, lang):
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
                     st.warning(R['risk_warn'].format(n=n_red))
-
-    # ---- 📖 ИНСТРУКЦИЯ (в самом низу) ----
-    st.divider()
-    with st.expander(R['guide_title']):
-        st.markdown(R['guide_md'])
