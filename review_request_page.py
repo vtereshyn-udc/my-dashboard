@@ -716,4 +716,4 @@ def render_review_page(get_engine, T_main, theme, lang):
                 f"**{R['cov_about']}**\n\n"
                 f"`Coverage % = (Sent + Already) / Orders × 100`\n\n"
                 f"`{R['cov_unproc']} = Orders − (Sent + Already)`"
-            )
+            ) 
