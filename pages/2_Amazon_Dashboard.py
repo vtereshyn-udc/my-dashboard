@@ -19,8 +19,43 @@ import requests as req          # 🆕 нужно для call_gemini (Gemini RES
 from dotenv import load_dotenv
 
 load_dotenv()
-from review_request_page import (render_review_page, REVIEW_TRANSLATIONS,
-                                  _gran_radio, _agg_period)
+from review_request_page import render_review_page, REVIEW_TRANSLATIONS
+
+
+# ============================================================
+# 🔧 ГРАНУЛЯРНІСТЬ (день / місяць / квартал) — локальний хелпер
+# (самодостатній: не залежить від review_request_page)
+# ============================================================
+
+def _gran_radio(R, key):
+    """Радіо День/Тиждень/Місяць/Квартал/Рік. Повертає 'day'|'week'|'month'|'quarter'|'year'."""
+    opts = {R['gran_day']: 'day', R['gran_week']: 'week', R['gran_month']: 'month',
+            R['gran_quarter']: 'quarter', R['gran_year']: 'year'}
+    return opts[st.radio(R['combo_gran'], list(opts.keys()),
+                         index=0, horizontal=True, key=key)]
+
+
+def _agg_period(df, date_col, gran, sum_cols):
+    """Агрегує df по періоду; повертає df з колонкою 'label' і просумованими sum_cols."""
+    d = df.copy()
+    d[date_col] = pd.to_datetime(d[date_col])
+    if gran == 'week':
+        d['period'] = d[date_col].dt.to_period('W')
+        d['label'] = d['period'].dt.start_time.dt.strftime('%d.%m.%y')  # пн тижня
+    elif gran == 'month':
+        d['period'] = d[date_col].dt.to_period('M')
+        d['label'] = d['period'].dt.strftime('%Y-%m')
+    elif gran == 'quarter':
+        d['period'] = d[date_col].dt.to_period('Q')
+        d['label'] = d['period'].astype(str)            # напр. 2026Q1
+    elif gran == 'year':
+        d['period'] = d[date_col].dt.to_period('Y')
+        d['label'] = d['period'].astype(str)            # напр. 2026
+    else:  # day
+        d['period'] = d[date_col].dt.normalize()
+        d['label'] = d[date_col].dt.strftime('%d.%m')
+    return (d.groupby(['period', 'label'], as_index=False)[list(sum_cols)]
+              .sum().sort_values('period'))
 
 st.set_page_config(
     page_title="Sales & Traffic Dashboard",
@@ -64,7 +99,7 @@ TRANSLATIONS = {
         "top_asins": "🏆 Top ASINs by Sales",
         "scatter_title": "🎯 Sessions vs CVR (size=sales, color=BuyBox)",
         "sales_sessions_title": "💰 Sales ($) and Sessions",
-        "combo_gran": "Granularity", "gran_day": "Day", "gran_month": "Month", "gran_quarter": "Quarter",
+        "combo_gran": "Granularity", "gran_day": "Day", "gran_week": "Week", "gran_month": "Month", "gran_quarter": "Quarter", "gran_year": "Year",
         "cvr_title": "🎯 CVR (%)",
         "pv_title": "👁️ Page Views: Browser vs Mobile",
         "sess_title": "👥 Sessions: Browser vs Mobile",
@@ -105,7 +140,7 @@ TRANSLATIONS = {
         "top_asins": "🏆 Топ ASIN за продажами",
         "scatter_title": "🎯 Сесії vs CVR (розмір=продажі, колір=BuyBox)",
         "sales_sessions_title": "💰 Продажі ($) і Сесії",
-        "combo_gran": "Деталізація", "gran_day": "День", "gran_month": "Місяць", "gran_quarter": "Квартал",
+        "combo_gran": "Деталізація", "gran_day": "День", "gran_week": "Тиждень", "gran_month": "Місяць", "gran_quarter": "Квартал", "gran_year": "Рік",
         "cvr_title": "🎯 CVR (%)",
         "pv_title": "👁️ Перегляди: браузер vs мобайл",
         "sess_title": "👥 Сесії: браузер vs мобайл",
@@ -146,7 +181,7 @@ TRANSLATIONS = {
         "top_asins": "🏆 Топ ASIN по продажам",
         "scatter_title": "🎯 Сессии vs CVR (размер=продажи, цвет=BuyBox)",
         "sales_sessions_title": "💰 Продажи ($) и Сессии",
-        "combo_gran": "Детализация", "gran_day": "День", "gran_month": "Месяц", "gran_quarter": "Квартал",
+        "combo_gran": "Детализация", "gran_day": "День", "gran_week": "Неделя", "gran_month": "Месяц", "gran_quarter": "Квартал", "gran_year": "Год",
         "cvr_title": "🎯 CVR (%)",
         "pv_title": "👁️ Просмотры: браузер vs мобайл",
         "sess_title": "👥 Сессии: браузер vs мобайл",
@@ -856,4 +891,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
