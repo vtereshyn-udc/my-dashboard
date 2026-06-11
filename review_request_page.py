@@ -46,6 +46,38 @@ from datetime import datetime, timedelta
 
 
 # ============================================================
+# 🔧 ГРАНУЛЯРНІСТЬ (день / місяць / квартал) — спільний хелпер
+# ============================================================
+
+def _gran_radio(R, key):
+    """Радіо День/Місяць/Квартал. Повертає 'day'|'month'|'quarter'."""
+    opts = {R['gran_day']: 'day', R['gran_month']: 'month', R['gran_quarter']: 'quarter'}
+    return opts[st.radio(R['combo_gran'], list(opts.keys()),
+                         index=0, horizontal=True, key=key)]
+
+
+def _agg_period(df, date_col, gran, sum_cols):
+    """
+    Агрегує df по періоду (day/month/quarter). Повертає df з колонкою 'label'
+    (підпис осі X) і просумованими sum_cols. Групує ЗАВЖДИ (зокрема day —
+    щоб коректно сумувати, якщо у вхідних даних кілька рядків на дату).
+    """
+    d = df.copy()
+    d[date_col] = pd.to_datetime(d[date_col])
+    if gran == 'month':
+        d['period'] = d[date_col].dt.to_period('M')
+        d['label'] = d['period'].dt.strftime('%Y-%m')
+    elif gran == 'quarter':
+        d['period'] = d[date_col].dt.to_period('Q')
+        d['label'] = d['period'].astype(str)            # напр. 2026Q1
+    else:  # day
+        d['period'] = d[date_col].dt.normalize()
+        d['label'] = d[date_col].dt.strftime('%d.%m')
+    return (d.groupby(['period', 'label'], as_index=False)[list(sum_cols)]
+              .sum().sort_values('period'))
+
+
+# ============================================================
 # 🌐 ПЕРЕКЛАДИ (доповнюють твій TRANSLATIONS)
 # ============================================================
 
@@ -727,31 +759,11 @@ def render_review_page(get_engine, T_main, theme, lang):
     if not cov.empty:
         st.markdown(f"### {R['combo_title']}")
         # 🆕 перемикач гранулярності: день / місяць / квартал
-        gran_map = {R['gran_day']: 'day', R['gran_month']: 'month',
-                    R['gran_quarter']: 'quarter'}
-        gran_sel = st.radio(R['combo_gran'], list(gran_map.keys()),
-                            index=0, horizontal=True, key="rr_combo_gran")
-        gran = gran_map[gran_sel]
-
-        cc = cov.copy()
-        cc['day'] = pd.to_datetime(cc['day'])
-        if gran == 'day':
-            cc = cc.sort_values('day')
-            cc['label'] = cc['day'].dt.strftime('%d.%m')
-        else:
-            # місяць/квартал: сумуємо orders+covered за період,
-            # coverage % рахуємо на агрегатах (Σcovered / Σorders), не середнє денних
-            if gran == 'month':
-                cc['period'] = cc['day'].dt.to_period('M')
-                cc['label'] = cc['period'].dt.strftime('%Y-%m')
-            else:
-                cc['period'] = cc['day'].dt.to_period('Q')
-                cc['label'] = cc['period'].astype(str)   # напр. 2026Q1
-            cc = (cc.groupby(['period', 'label'], as_index=False)
-                    .agg(orders=('orders', 'sum'), covered=('covered', 'sum'))
-                    .sort_values('period'))
-            cc['coverage'] = (cc['covered'] / cc['orders'].where(cc['orders'] > 0)
-                              * 100).fillna(0).round(1)
+        gran = _gran_radio(R, key="rr_combo_gran")
+        cc = _agg_period(cov, 'day', gran, ['orders', 'covered'])
+        # coverage % — завжди на агрегатах (Σcovered / Σorders), не середнє денних
+        cc['coverage'] = (cc['covered'] / cc['orders'].where(cc['orders'] > 0)
+                          * 100).fillna(0).round(1)
 
         figc = make_subplots(specs=[[{"secondary_y": True}]])
         figc.add_trace(go.Bar(name=R['kpi_orders'], x=cc['label'], y=cc['orders'],
@@ -915,15 +927,14 @@ def render_review_page(get_engine, T_main, theme, lang):
         st.markdown(f"### {R['missed_title']}")
         st.caption(R['missed_sub'])
         if not missed.empty and missed['missed'].sum() > 0:
+            gran_m = _gran_radio(R, key="rr_missed_gran")
             md = missed.copy()
-            md['day_dt'] = pd.to_datetime(md['day'])
-            md['day'] = md['day_dt'].dt.strftime('%d.%m')
-            # 🆕 день вважається «робочим», якщо система мала хоч якусь активність
-            md['active'] = md['any_activity'] > 0
-            bar_colors = ['#e8590c' if a else '#adb5bd' for a in md['active']]
+            mc = _agg_period(md, 'day', gran_m, ['missed', 'orders', 'any_activity'])
+            # сірим — періоди без жодної активності системи (доба до запуску)
+            bar_colors = ['#e8590c' if a > 0 else '#adb5bd' for a in mc['any_activity']]
 
             figm = go.Figure()
-            figm.add_trace(go.Bar(x=md['day'], y=md['missed'],
+            figm.add_trace(go.Bar(x=mc['label'], y=mc['missed'],
                                   marker_color=bar_colors, name=R['missed_lbl']))
             figm.update_layout(
                 height=320, template=theme['template'],
@@ -933,8 +944,9 @@ def render_review_page(get_engine, T_main, theme, lang):
             figm.update_yaxes(gridcolor=theme['grid'])
             st.plotly_chart(figm, use_container_width=True)
 
-            # 🆕 ЧЕСНИЙ ітог: лише дні, коли система ПРАЦЮВАЛА (active)
-            act = md[md['active']]
+            # 🆕 ЧЕСНИЙ ітог: лише дні, коли система ПРАЦЮВАЛА (за сирими днями,
+            #    незалежно від обраної гранулярності графіка)
+            act = md[md['any_activity'] > 0]
             total_missed = int(act['missed'].sum())
             total_ord    = int(act['orders'].sum())
             pct = (total_missed / total_ord * 100) if total_ord else 0
@@ -975,20 +987,25 @@ def render_review_page(get_engine, T_main, theme, lang):
     st.markdown(f"### {R['daily_title']}")
     st.caption(R['legend_hint'], unsafe_allow_html=True)
     if not daily.empty:
+        gran_d = _gran_radio(R, key="rr_daily_gran")
+        dd = _agg_period(daily, 'day', gran_d,
+                         ['sent', 'already', 'outside', 'failed'])
+        txt_color = "#1e293b" if theme['bg'] == "#f5f7fa" else "#e6edf3"
         fig = go.Figure()
-        fig.add_trace(go.Bar(name=R['col_sent'], x=daily['day'], y=daily['sent'],
+        fig.add_trace(go.Bar(name=R['col_sent'], x=dd['label'], y=dd['sent'],
                              marker_color='#64c896'))
-        fig.add_trace(go.Bar(name=R['col_already'], x=daily['day'], y=daily['already'],
+        fig.add_trace(go.Bar(name=R['col_already'], x=dd['label'], y=dd['already'],
                              marker_color='#7c9fff'))
-        fig.add_trace(go.Bar(name=R['col_outside'], x=daily['day'], y=daily['outside'],
+        fig.add_trace(go.Bar(name=R['col_outside'], x=dd['label'], y=dd['outside'],
                              marker_color='#ffd700'))
-        fig.add_trace(go.Bar(name=R['col_failed'], x=daily['day'], y=daily['failed'],
+        fig.add_trace(go.Bar(name=R['col_failed'], x=dd['label'], y=dd['failed'],
                              marker_color='#e03131'))
         fig.update_layout(
             barmode='stack', height=380, template=theme['template'],
             paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
             margin=dict(l=0, r=0, t=10, b=0), hovermode='x unified',
-            legend=dict(orientation="h", y=1.08))
+            font=dict(color=txt_color),
+            legend=dict(orientation="h", y=1.08, font=dict(color=txt_color)))
         fig.update_xaxes(gridcolor=theme['grid'])
         fig.update_yaxes(gridcolor=theme['grid'])
         st.plotly_chart(fig, use_container_width=True)
@@ -1149,5 +1166,6 @@ def render_review_page(get_engine, T_main, theme, lang):
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
                     st.warning(R['risk_warn'].format(n=n_red)) 
+
 
 
