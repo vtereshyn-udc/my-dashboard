@@ -19,7 +19,8 @@ import requests as req          # 🆕 нужно для call_gemini (Gemini RES
 from dotenv import load_dotenv
 
 load_dotenv()
-from review_request_page import render_review_page, REVIEW_TRANSLATIONS
+from review_request_page import (render_review_page, REVIEW_TRANSLATIONS,
+                                  _gran_radio, _agg_period)
 
 st.set_page_config(
     page_title="Sales & Traffic Dashboard",
@@ -63,6 +64,7 @@ TRANSLATIONS = {
         "top_asins": "🏆 Top ASINs by Sales",
         "scatter_title": "🎯 Sessions vs CVR (size=sales, color=BuyBox)",
         "sales_sessions_title": "💰 Sales ($) and Sessions",
+        "combo_gran": "Granularity", "gran_day": "Day", "gran_month": "Month", "gran_quarter": "Quarter",
         "cvr_title": "🎯 CVR (%)",
         "pv_title": "👁️ Page Views: Browser vs Mobile",
         "sess_title": "👥 Sessions: Browser vs Mobile",
@@ -103,6 +105,7 @@ TRANSLATIONS = {
         "top_asins": "🏆 Топ ASIN за продажами",
         "scatter_title": "🎯 Сесії vs CVR (розмір=продажі, колір=BuyBox)",
         "sales_sessions_title": "💰 Продажі ($) і Сесії",
+        "combo_gran": "Деталізація", "gran_day": "День", "gran_month": "Місяць", "gran_quarter": "Квартал",
         "cvr_title": "🎯 CVR (%)",
         "pv_title": "👁️ Перегляди: браузер vs мобайл",
         "sess_title": "👥 Сесії: браузер vs мобайл",
@@ -143,6 +146,7 @@ TRANSLATIONS = {
         "top_asins": "🏆 Топ ASIN по продажам",
         "scatter_title": "🎯 Сессии vs CVR (размер=продажи, цвет=BuyBox)",
         "sales_sessions_title": "💰 Продажи ($) и Сессии",
+        "combo_gran": "Детализация", "gran_day": "День", "gran_month": "Месяц", "gran_quarter": "Квартал",
         "cvr_title": "🎯 CVR (%)",
         "pv_title": "👁️ Просмотры: браузер vs мобайл",
         "sess_title": "👥 Сессии: браузер vs мобайл",
@@ -627,26 +631,31 @@ def kpi_row(df, T):
 
 
 def chart_sales_sessions(df, T, theme):
-    daily = df.groupby('date').agg(
-        sales=('ordered_product_sales','sum'),
-        sessions=('sessions','sum'),
-        cvr=('unit_session_percentage','mean'),
-    ).reset_index()
+    # 🆕 перемикач день/місяць/квартал
+    gran = _gran_radio(T, key="amz_sales_gran")
+    daily = _agg_period(df, 'date', gran,
+                        ['ordered_product_sales', 'sessions', 'units_ordered'])
+    daily = daily.rename(columns={'ordered_product_sales': 'sales'})
+    # CVR — ratio, рахуємо на агрегаті (Σunits / Σsessions), не середнє денних %
+    daily['cvr'] = (daily['units_ordered']
+                    / daily['sessions'].where(daily['sessions'] > 0) * 100).fillna(0)
+    txt_color = "#1e293b" if theme['bg'] == "#f5f7fa" else "#e6edf3"
 
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
         subplot_titles=[T['sales_sessions_title'], T['cvr_title']],
         row_heights=[0.65, 0.35], vertical_spacing=0.08)
-    fig.add_trace(go.Bar(x=daily['date'], y=daily['sales'],
+    fig.add_trace(go.Bar(x=daily['label'], y=daily['sales'],
         name=T['sales'], marker_color='#7c9fff', opacity=0.85), row=1, col=1)
-    fig.add_trace(go.Scatter(x=daily['date'], y=daily['sessions'],
+    fig.add_trace(go.Scatter(x=daily['label'], y=daily['sessions'],
         name=T['sessions'], line=dict(color='#ff7c7c', width=2)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=daily['date'], y=daily['cvr'],
+    fig.add_trace(go.Scatter(x=daily['label'], y=daily['cvr'],
         name=T['cvr'], fill='tozeroy',
         fillcolor='rgba(100,200,150,0.15)',
         line=dict(color='#64c896', width=2)), row=2, col=1)
     fig.update_layout(height=450, template=theme['template'],
         paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
-        legend=dict(orientation="h", y=1.05),
+        legend=dict(orientation="h", y=1.05, font=dict(color=txt_color)),
+        font=dict(color=txt_color),
         margin=dict(l=0,r=0,t=40,b=0), hovermode='x unified')
     fig.update_xaxes(gridcolor=theme['grid'])
     fig.update_yaxes(gridcolor=theme['grid'])
@@ -713,18 +722,21 @@ def chart_traffic_split(df, T, theme):
 
 
 def chart_b2b(df, T, theme):
-    daily = df.groupby('date').agg(
-        sales=('ordered_product_sales','sum'),
-        sales_b2b=('ordered_product_sales_b2b','sum'),
-    ).reset_index()
+    # 🆕 перемикач день/місяць/квартал
+    gran = _gran_radio(T, key="amz_b2b_gran")
+    daily = _agg_period(df, 'date', gran,
+                        ['ordered_product_sales', 'ordered_product_sales_b2b'])
+    daily = daily.rename(columns={'ordered_product_sales': 'sales',
+                                  'ordered_product_sales_b2b': 'sales_b2b'})
     daily['sales_b2c'] = daily['sales'] - daily['sales_b2b']
+    txt_color = "#1e293b" if theme['bg'] == "#f5f7fa" else "#e6edf3"
     fig = go.Figure()
-    fig.add_trace(go.Bar(name='B2C', x=daily['date'], y=daily['sales_b2c'], marker_color='#7c9fff'))
-    fig.add_trace(go.Bar(name='B2B', x=daily['date'], y=daily['sales_b2b'], marker_color='#ffd700'))
+    fig.add_trace(go.Bar(name='B2C', x=daily['label'], y=daily['sales_b2c'], marker_color='#7c9fff'))
+    fig.add_trace(go.Bar(name='B2B', x=daily['label'], y=daily['sales_b2b'], marker_color='#ffd700'))
     fig.update_layout(barmode='stack', title=T['b2b_title'], height=300,
         template=theme['template'], paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
-        margin=dict(l=0,r=0,t=40,b=0),
-        hovermode='x unified', legend=dict(orientation="h", y=1.05))
+        margin=dict(l=0,r=0,t=40,b=0), font=dict(color=txt_color),
+        hovermode='x unified', legend=dict(orientation="h", y=1.05, font=dict(color=txt_color)))
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -844,3 +856,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
