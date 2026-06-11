@@ -50,8 +50,9 @@ from datetime import datetime, timedelta
 # ============================================================
 
 def _gran_radio(R, key):
-    """Радіо День/Місяць/Квартал. Повертає 'day'|'month'|'quarter'."""
-    opts = {R['gran_day']: 'day', R['gran_month']: 'month', R['gran_quarter']: 'quarter'}
+    """Радіо День/Тиждень/Місяць/Квартал/Рік. Повертає 'day'|'week'|'month'|'quarter'|'year'."""
+    opts = {R['gran_day']: 'day', R['gran_week']: 'week', R['gran_month']: 'month',
+            R['gran_quarter']: 'quarter', R['gran_year']: 'year'}
     return opts[st.radio(R['combo_gran'], list(opts.keys()),
                          index=0, horizontal=True, key=key)]
 
@@ -64,12 +65,18 @@ def _agg_period(df, date_col, gran, sum_cols):
     """
     d = df.copy()
     d[date_col] = pd.to_datetime(d[date_col])
-    if gran == 'month':
+    if gran == 'week':
+        d['period'] = d[date_col].dt.to_period('W')
+        d['label'] = d['period'].dt.start_time.dt.strftime('%d.%m.%y')  # пн тижня
+    elif gran == 'month':
         d['period'] = d[date_col].dt.to_period('M')
         d['label'] = d['period'].dt.strftime('%Y-%m')
     elif gran == 'quarter':
         d['period'] = d[date_col].dt.to_period('Q')
         d['label'] = d['period'].astype(str)            # напр. 2026Q1
+    elif gran == 'year':
+        d['period'] = d[date_col].dt.to_period('Y')
+        d['label'] = d['period'].astype(str)            # напр. 2026
     else:  # day
         d['period'] = d[date_col].dt.normalize()
         d['label'] = d[date_col].dt.strftime('%d.%m')
@@ -137,7 +144,7 @@ REVIEW_TRANSLATIONS = {
         "flt_period": "📅 Order period", "flt_threshold": "Coverage threshold", "flt_status": "Status",
         "flt_all": "All", "kpi_orders": "🛒 Orders in period",
         "combo_title": "📊 Orders vs Requests by order date", "combo_processed": "Processed (Sent + Already)",
-        "combo_gran": "Granularity", "gran_day": "Day", "gran_month": "Month", "gran_quarter": "Quarter",
+        "combo_gran": "Granularity", "gran_day": "Day", "gran_week": "Week", "gran_month": "Month", "gran_quarter": "Quarter", "gran_year": "Year",
         "cov_note": "ℹ️ Requests can only be sent when an order is 5–30 days old. Recent dates (under ~8 days) show ⏳ Maturing — that's normal: coverage there isn't possible yet. 🟠 In progress — window open, the system is still catching up (not a loss). 🔴 Missed — window closed, reviews are lost. Sending more often won't speed this up.",
         "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window", "cov_total": "▦ TOTAL", "cov_total_note": "matured dates only (excl. ⏳)",
         "cov_leg_maturing": "order too recent — wait for the send window",
@@ -235,7 +242,7 @@ Amazon only allows a request when an order is 5–30 days old. Recent orders are
         "flt_period": "📅 Період замовлення", "flt_threshold": "Поріг покриття", "flt_status": "Статус",
         "flt_all": "Усі", "kpi_orders": "🛒 Orders у періоді",
         "combo_title": "📊 Orders vs Requests по датах замовлення", "combo_processed": "Оброблено (Sent + Already)",
-        "combo_gran": "Деталізація", "gran_day": "День", "gran_month": "Місяць", "gran_quarter": "Квартал",
+        "combo_gran": "Деталізація", "gran_day": "День", "gran_week": "Тиждень", "gran_month": "Місяць", "gran_quarter": "Квартал", "gran_year": "Рік",
         "cov_note": "ℹ️ Запит можна відправити лише коли замовленню 5–30 днів. Свіжі дати (молодші ~8 днів) показують ⏳ Зріє — це норма: покриття там ще неможливе. 🟠 В роботі — вікно відкрите, система ще доганяє (не втрата). 🔴 Упущено — вікно закрилось, відгуки втрачені. Збільшення частоти відправки нічого не прискорить.",
         "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна", "cov_total": "▦ РАЗОМ", "cov_total_note": "лише дозрілі дати (без ⏳)",
         "cov_leg_maturing": "замовлення надто свіже — чекаємо вікно відправки",
@@ -333,7 +340,7 @@ Amazon дозволяє надіслати запит лише коли замо
         "flt_period": "📅 Период заказа", "flt_threshold": "Порог покрытия", "flt_status": "Статус",
         "flt_all": "Все", "kpi_orders": "🛒 Orders в периоде",
         "combo_title": "📊 Orders vs Requests по датам заказа", "combo_processed": "Обработано (Sent + Already)",
-        "combo_gran": "Детализация", "gran_day": "День", "gran_month": "Месяц", "gran_quarter": "Квартал",
+        "combo_gran": "Детализация", "gran_day": "День", "gran_week": "Неделя", "gran_month": "Месяц", "gran_quarter": "Квартал", "gran_year": "Год",
         "cov_note": "ℹ️ Запрос можно отправить только когда заказу 5–30 дней. Свежие даты (моложе ~8 дней) показывают ⏳ Зреет — это норма: покрытие там ещё невозможно. 🟠 В работе — окно открыто, система ещё догоняет (не потеря). 🔴 Упущено — окно закрылось, отзывы потеряны. Увеличение частоты отправки ничего не ускорит.",
         "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна", "cov_total": "▦ ИТОГО", "cov_total_note": "только дозревшие даты (без ⏳)",
         "cov_leg_maturing": "заказ слишком свежий — ждём окно отправки",
@@ -1166,6 +1173,7 @@ def render_review_page(get_engine, T_main, theme, lang):
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
                     st.warning(R['risk_warn'].format(n=n_red)) 
+
 
 
 
