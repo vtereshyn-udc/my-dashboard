@@ -105,6 +105,7 @@ REVIEW_TRANSLATIONS = {
         "flt_period": "📅 Order period", "flt_threshold": "Coverage threshold", "flt_status": "Status",
         "flt_all": "All", "kpi_orders": "🛒 Orders in period",
         "combo_title": "📊 Orders vs Requests by order date", "combo_processed": "Processed (Sent + Already)",
+        "combo_gran": "Granularity", "gran_day": "Day", "gran_month": "Month", "gran_quarter": "Quarter",
         "cov_note": "ℹ️ Requests can only be sent when an order is 5–30 days old. Recent dates (under ~8 days) show ⏳ Maturing — that's normal: coverage there isn't possible yet. 🟠 In progress — window open, the system is still catching up (not a loss). 🔴 Missed — window closed, reviews are lost. Sending more often won't speed this up.",
         "cov_maturing": "Maturing", "cov_c_maturing": "Still within/before window", "cov_total": "▦ TOTAL", "cov_total_note": "matured dates only (excl. ⏳)",
         "cov_leg_maturing": "order too recent — wait for the send window",
@@ -202,6 +203,7 @@ Amazon only allows a request when an order is 5–30 days old. Recent orders are
         "flt_period": "📅 Період замовлення", "flt_threshold": "Поріг покриття", "flt_status": "Статус",
         "flt_all": "Усі", "kpi_orders": "🛒 Orders у періоді",
         "combo_title": "📊 Orders vs Requests по датах замовлення", "combo_processed": "Оброблено (Sent + Already)",
+        "combo_gran": "Деталізація", "gran_day": "День", "gran_month": "Місяць", "gran_quarter": "Квартал",
         "cov_note": "ℹ️ Запит можна відправити лише коли замовленню 5–30 днів. Свіжі дати (молодші ~8 днів) показують ⏳ Зріє — це норма: покриття там ще неможливе. 🟠 В роботі — вікно відкрите, система ще доганяє (не втрата). 🔴 Упущено — вікно закрилось, відгуки втрачені. Збільшення частоти відправки нічого не прискорить.",
         "cov_maturing": "Зріє", "cov_c_maturing": "Ще у вікні / до вікна", "cov_total": "▦ РАЗОМ", "cov_total_note": "лише дозрілі дати (без ⏳)",
         "cov_leg_maturing": "замовлення надто свіже — чекаємо вікно відправки",
@@ -299,6 +301,7 @@ Amazon дозволяє надіслати запит лише коли замо
         "flt_period": "📅 Период заказа", "flt_threshold": "Порог покрытия", "flt_status": "Статус",
         "flt_all": "Все", "kpi_orders": "🛒 Orders в периоде",
         "combo_title": "📊 Orders vs Requests по датам заказа", "combo_processed": "Обработано (Sent + Already)",
+        "combo_gran": "Детализация", "gran_day": "День", "gran_month": "Месяц", "gran_quarter": "Квартал",
         "cov_note": "ℹ️ Запрос можно отправить только когда заказу 5–30 дней. Свежие даты (моложе ~8 дней) показывают ⏳ Зреет — это норма: покрытие там ещё невозможно. 🟠 В работе — окно открыто, система ещё догоняет (не потеря). 🔴 Упущено — окно закрылось, отзывы потеряны. Увеличение частоты отправки ничего не ускорит.",
         "cov_maturing": "Зреет", "cov_c_maturing": "Ещё в окне / до окна", "cov_total": "▦ ИТОГО", "cov_total_note": "только дозревшие даты (без ⏳)",
         "cov_leg_maturing": "заказ слишком свежий — ждём окно отправки",
@@ -723,14 +726,39 @@ def render_review_page(get_engine, T_main, theme, lang):
     # ---- 🆕 ГРАФІК Orders vs Requests + Coverage % лінія ----
     if not cov.empty:
         st.markdown(f"### {R['combo_title']}")
-        cc = cov.sort_values('day').copy()
-        cc['day_str'] = pd.to_datetime(cc['day']).dt.strftime('%d.%m')
+        # 🆕 перемикач гранулярності: день / місяць / квартал
+        gran_map = {R['gran_day']: 'day', R['gran_month']: 'month',
+                    R['gran_quarter']: 'quarter'}
+        gran_sel = st.radio(R['combo_gran'], list(gran_map.keys()),
+                            index=0, horizontal=True, key="rr_combo_gran")
+        gran = gran_map[gran_sel]
+
+        cc = cov.copy()
+        cc['day'] = pd.to_datetime(cc['day'])
+        if gran == 'day':
+            cc = cc.sort_values('day')
+            cc['label'] = cc['day'].dt.strftime('%d.%m')
+        else:
+            # місяць/квартал: сумуємо orders+covered за період,
+            # coverage % рахуємо на агрегатах (Σcovered / Σorders), не середнє денних
+            if gran == 'month':
+                cc['period'] = cc['day'].dt.to_period('M')
+                cc['label'] = cc['period'].dt.strftime('%Y-%m')
+            else:
+                cc['period'] = cc['day'].dt.to_period('Q')
+                cc['label'] = cc['period'].astype(str)   # напр. 2026Q1
+            cc = (cc.groupby(['period', 'label'], as_index=False)
+                    .agg(orders=('orders', 'sum'), covered=('covered', 'sum'))
+                    .sort_values('period'))
+            cc['coverage'] = (cc['covered'] / cc['orders'].where(cc['orders'] > 0)
+                              * 100).fillna(0).round(1)
+
         figc = make_subplots(specs=[[{"secondary_y": True}]])
-        figc.add_trace(go.Bar(name=R['kpi_orders'], x=cc['day_str'], y=cc['orders'],
+        figc.add_trace(go.Bar(name=R['kpi_orders'], x=cc['label'], y=cc['orders'],
                               marker_color='#3b5bdb'), secondary_y=False)
-        figc.add_trace(go.Bar(name=R['combo_processed'], x=cc['day_str'], y=cc['covered'],
+        figc.add_trace(go.Bar(name=R['combo_processed'], x=cc['label'], y=cc['covered'],
                               marker_color='#22b8cf'), secondary_y=False)
-        figc.add_trace(go.Scatter(name=R['cov_pct'], x=cc['day_str'], y=cc['coverage'],
+        figc.add_trace(go.Scatter(name=R['cov_pct'], x=cc['label'], y=cc['coverage'],
                               mode='lines+markers', line=dict(color='#cc5de8', width=2)),
                        secondary_y=True)
         # лінія порогу
@@ -1118,3 +1146,4 @@ def render_review_page(get_engine, T_main, theme, lang):
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
                     st.warning(R['risk_warn'].format(n=n_red)) 
+
