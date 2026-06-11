@@ -764,11 +764,14 @@ def render_review_page(get_engine, T_main, theme, lang):
         # лінія порогу
         figc.add_hline(y=threshold, line_dash="dot", line_color="#ffd43b",
                        secondary_y=True, opacity=0.6)
+        # колір тексту під тему (у тёмной темі дефолтний шрифт легенди не видно)
+        txt_color = "#1e293b" if theme['bg'] == "#f5f7fa" else "#e6edf3"
         figc.update_layout(
             barmode='group', height=380, template=theme['template'],
             paper_bgcolor=theme['paper_bg'], plot_bgcolor=theme['plot_bg'],
             margin=dict(l=0, r=0, t=10, b=0), hovermode='x unified',
-            legend=dict(orientation="h", y=1.1))
+            font=dict(color=txt_color),
+            legend=dict(orientation="h", y=1.1, font=dict(color=txt_color)))
         figc.update_xaxes(gridcolor=theme['grid'])
         figc.update_yaxes(gridcolor=theme['grid'], secondary_y=False)
         figc.update_yaxes(range=[0, 105], secondary_y=True, ticksuffix="%", showgrid=False)
@@ -1146,4 +1149,5 @@ def render_review_page(get_engine, T_main, theme, lang):
                 n_red = int((risk['star_impact'] <= -0.3).sum())
                 if n_red > 0:
                     st.warning(R['risk_warn'].format(n=n_red)) 
+
 
